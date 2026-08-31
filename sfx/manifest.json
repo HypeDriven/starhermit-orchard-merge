@@ -1,0 +1,74 @@
+[
+  {
+    "name": "ui-click",
+    "seconds": 1,
+    "prompt": "Short dry wooden button click, a quick tap on a wooden crate panel, no reverb",
+    "event": "click"
+  },
+  {
+    "name": "fruit-drop",
+    "seconds": 1,
+    "prompt": "Soft airy whoosh of a round fruit released and falling a short distance through air",
+    "event": "drop"
+  },
+  {
+    "name": "fruit-thud",
+    "seconds": 1,
+    "prompt": "Dull fleshy thud of a round fruit landing on other fruit inside a wooden crate",
+    "event": "thud"
+  },
+  {
+    "name": "merge-small",
+    "seconds": 1,
+    "prompt": "Light juicy pop of two small berries squishing together into one, bright and wet",
+    "event": "merge"
+  },
+  {
+    "name": "merge-medium",
+    "seconds": 2,
+    "prompt": "Wet juicy squelch of two apples merging together with a short bright magical sparkle",
+    "event": "merge"
+  },
+  {
+    "name": "merge-large",
+    "seconds": 2,
+    "prompt": "Deep juicy splat of two large melons merging together with a warm shimmering glow",
+    "event": "merge"
+  },
+  {
+    "name": "warn-alert",
+    "seconds": 2,
+    "prompt": "Hollow wooden alarm knock struck twice, urgent but soft, orchard crate warning",
+    "event": "warn"
+  },
+  {
+    "name": "invalid-action",
+    "seconds": 1,
+    "prompt": "Short muted error bonk, a soft dull knock on wood signaling a rejected action",
+    "event": "invalid"
+  },
+  {
+    "name": "fanfare-win",
+    "seconds": 3,
+    "prompt": "Cheerful short victory jingle with acoustic guitar strums and bells, happy harvest mood",
+    "event": "fanfare"
+  },
+  {
+    "name": "fanfare-lose",
+    "seconds": 3,
+    "prompt": "Gentle descending disappointed jingle, soft marimba notes falling, game over",
+    "event": "fanfare"
+  },
+  {
+    "name": "countdown-tick",
+    "seconds": 1,
+    "prompt": "Single crisp dry wooden block tick, short countdown count hit",
+    "event": "countdown"
+  },
+  {
+    "name": "countdown-go",
+    "seconds": 1,
+    "prompt": "Bright ascending chime ding signaling go, cheerful start of round",
+    "event": "countdown"
+  }
+]

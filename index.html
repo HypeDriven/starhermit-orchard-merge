@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Orchard Merge</title>
+<style>
+  :root{
+    --bg:#1d2b1a; --panel:#2c4023; --panel2:#243620; --ink:#f4eedd; --dim:#c9c2a8;
+    --accent:#ffb84d; --accent2:#7fd069; --danger:#ff6b5e; --line:#55704a;
+    --fs:16px; --tap:44px; --radius:12px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font:400 var(--fs)/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-text-size-adjust:100%}
+  body.larger-text{font-size:19px}
+  body.high-contrast{--bg:#000;--panel:#111;--panel2:#000;--ink:#fff;--dim:#e8e8e8;
+    --accent:#ffd400;--accent2:#00ff88;--danger:#ff4444;--line:#888}
+  :focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+  button{font:inherit;min-height:var(--tap);min-width:var(--tap);padding:10px 18px;
+    border:2px solid var(--line);border-radius:var(--radius);background:var(--panel2);
+    color:var(--ink);cursor:pointer}
+  button:hover{background:var(--panel)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#241a05;font-weight:700}
+  button.danger{border-color:var(--danger);color:var(--danger)}
+  button[disabled]{opacity:.45;cursor:default}
+  input[type=range]{accent-color:var(--accent);min-height:var(--tap)}
+  select,input[type=number]{font:inherit;background:var(--panel2);color:var(--ink);
+    border:2px solid var(--line);border-radius:8px;padding:8px;min-height:var(--tap)}
+  h1,h2,h3{margin:.2em 0 .4em}
+  #app{display:flex;flex-direction:column;height:100%}
+  #stage{position:relative;flex:1;min-height:0}
+  #gl{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
+  .screen{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    background:rgba(10,16,8,.72);backdrop-filter:blur(3px);z-index:20;overflow:auto;padding:16px}
+  .card{background:var(--panel);border:2px solid var(--line);border-radius:16px;
+    padding:24px;max-width:640px;width:100%;max-height:100%;overflow:auto;box-shadow:0 8px 40px #0008}
+  .col{display:flex;flex-direction:column;gap:10px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .hidden{display:none!important}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:8px}
+  .grid button.locked{opacity:.4}
+  .kbd{font-family:ui-monospace,monospace;background:#0006;border:1px solid var(--line);
+    border-radius:5px;padding:0 6px;font-size:.85em}
+  .muted{color:var(--dim)}
+  .small{font-size:.85em}
+  /* HUD layout */
+  #hud{position:absolute;inset:0;pointer-events:none;z-index:10;display:grid;
+    grid-template-columns:minmax(180px,240px) 1fr minmax(180px,240px);gap:8px;padding:8px}
+  .rail{pointer-events:auto;display:flex;flex-direction:column;gap:10px;align-self:start}
+  .panel{background:rgba(30,44,24,.88);border:2px solid var(--line);border-radius:var(--radius);padding:12px}
+  #score-big{font-size:1.8em;font-weight:800;color:var(--accent)}
+  #topbar{display:none}
+  @media (max-width:1023px){
+    #hud{grid-template-columns:1fr;grid-template-rows:auto 1fr auto;padding:6px}
+    .rail{display:none}
+    #topbar{display:flex;gap:8px;pointer-events:auto;flex-wrap:wrap;align-items:center;
+      background:rgba(30,44,24,.88);border:2px solid var(--line);border-radius:var(--radius);padding:8px}
+    #thumbtray{display:flex;gap:8px;pointer-events:auto;justify-content:center;flex-wrap:wrap}
+  }
+  @media (min-width:1024px){#thumbtray{display:none}}
+  #aria-live{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+  #board-list{max-height:160px;overflow:auto;font-size:.85em;margin:6px 0 0;padding-left:18px}
+  #warn-banner{position:absolute;top:8px;left:50%;transform:translateX(-50%);
+    background:var(--danger);color:#200;padding:6px 16px;border-radius:10px;font-weight:700;z-index:15}
+  #countdown{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    font-size:6rem;font-weight:900;color:var(--accent);z-index:30;text-shadow:0 4px 24px #000;pointer-events:none}
+  #ctxlost{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:40;
+    background:#000c;text-align:center;padding:20px}
+  .badge{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:2px 10px;font-size:.8em}
+  table{border-collapse:collapse;width:100%}
+  th,td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left}
+  label.slider{display:flex;flex-direction:column;gap:4px;min-width:140px}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage">
+    <canvas id="gl" aria-hidden="true"></canvas>
+
+    <!-- HUD -->
+    <div id="hud" class="hidden" aria-hidden="false">
+      <div class="rail" id="rail-left">
+        <div class="panel">
+          <h2 class="small muted">Objective</h2>
+          <div id="objective"></div>
+        </div>
+        <div class="panel">
+          <h2 class="small muted">Board</h2>
+          <ol id="board-list" aria-label="Fruits on the board"></ol>
+        </div>
+      </div>
+      <div></div>
+      <div class="rail" id="rail-right">
+        <div class="panel" style="text-align:center">
+          <div class="small muted">Score</div>
+          <div id="score-big">0</div>
+          <div class="small muted">Next</div>
+          <div id="next-fruit" style="font-size:1.6em">–</div>
+        </div>
+        <div class="panel col" style="display:flex">
+          <label class="slider">Aim
+            <input type="range" id="aim-slider" min="1" max="19" step="0.05" value="10" aria-label="Aim position">
+          </label>
+          <button id="btn-drop" class="primary">Drop <span class="kbd">Space</span></button>
+          <div class="row">
+            <button id="btn-undo" title="Undo (practice)">Undo <span class="kbd">U</span></button>
+            <button id="btn-hint" title="Hint">Hint <span class="kbd">H</span></button>
+          </div>
+          <div class="row">
+            <button id="btn-skip" title="Fast-forward settling">Skip ⏩</button>
+            <button id="btn-pause">Pause <span class="kbd">P</span></button>
+          </div>
+        </div>
+      </div>
+      <div id="topbar">
+        <strong id="score-top">0</strong>
+        <span class="badge" id="next-top">–</span>
+        <span class="badge" id="objective-top"></span>
+      </div>
+      <div></div>
+      <div id="thumbtray">
+        <button id="tt-drop" class="primary">Drop</button>
+        <button id="tt-hint">Hint</button>
+        <button id="tt-undo">Undo</button>
+        <button id="tt-skip">Skip</button>
+        <button id="tt-pause">Pause</button>
+      </div>
+    </div>
+
+    <div id="warn-banner" class="hidden" role="alert">⚠ Fruit above the line!</div>
+    <div id="countdown" class="hidden" aria-live="assertive"></div>
+    <div id="ctxlost" class="hidden"><div class="card"><h2>Graphics context lost</h2>
+      <p id="ctxlost-msg">The WebGL context was lost. It will rebuild automatically when restored.</p></div></div>
+
+    <!-- Title -->
+    <section id="scr-title" class="screen" aria-labelledby="title-h">
+      <div class="card col" style="text-align:center">
+        <h1 id="title-h">🍑 Orchard Merge</h1>
+        <p class="muted">A deterministic physics merge puzzle.</p>
+        <p id="away-line" class="muted small hidden"></p>
+        <button id="bt-resume" class="primary hidden">Resume last run</button>
+        <button id="bt-play" class="primary" style="font-size:1.3em">▶ Play</button>
+        <div class="row" style="justify-content:center">
+          <button id="bt-daily">Daily</button>
+          <button id="bt-journey">Journey</button>
+          <button id="bt-practice">Practice</button>
+          <button id="bt-challenge">Challenge</button>
+        </div>
+        <div class="row" style="justify-content:center">
+          <button id="bt-scores">Score chase</button>
+          <button id="bt-settings">Settings</button>
+          <button id="bt-help">Help</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Mode setup -->
+    <section id="scr-setup" class="screen hidden" aria-labelledby="setup-h">
+      <div class="card col">
+        <h2 id="setup-h">Mode</h2>
+        <div id="setup-body" class="col"></div>
+        <div class="row">
+          <button id="setup-start" class="primary">Start</button>
+          <button id="setup-back">Back</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Pause -->
+    <section id="scr-pause" class="screen hidden" aria-labelledby="pause-h">
+      <div class="card col" style="text-align:center">
+        <h2 id="pause-h">Paused</h2>
+        <button id="bp-resume" class="primary">Resume</button>
+        <button id="bp-restart">Restart <span class="kbd">R</span></button>
+        <button id="bp-settings">Settings</button>
+        <button id="bp-help">Help</button>
+        <button id="bp-leave" class="danger">Leave run</button>
+      </div>
+    </section>
+
+    <!-- Results -->
+    <section id="scr-results" class="screen hidden" aria-labelledby="res-h">
+      <div class="card col">
+        <h2 id="res-h">Results</h2>
+        <div id="res-breakdown"></div>
+        <div class="row">
+          <button id="br-retry" class="primary">Retry</button>
+          <button id="br-next" class="hidden">Next</button>
+          <button id="br-title">Back to title</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section id="scr-settings" class="screen hidden" aria-labelledby="set-h">
+      <div class="card col">
+        <h2 id="set-h">Settings</h2>
+        <div class="row">
+          <label class="slider">Music <input type="range" id="set-music" min="0" max="1" step="0.05"></label>
+          <label class="slider">Effects <input type="range" id="set-sfx" min="0" max="1" step="0.05"></label>
+          <label class="slider">Ambience <input type="range" id="set-amb" min="0" max="1" step="0.05"></label>
+        </div>
+        <label><input type="checkbox" id="set-mute"> Mute all</label>
+        <label><input type="checkbox" id="set-haptics"> Haptics (vibrate on merge)</label>
+        <label>Quality
+          <select id="set-quality">
+            <option value="low">Low</option><option value="med">Medium</option><option value="high">High</option>
+          </select></label>
+        <label>Color palette
+          <select id="set-palette">
+            <option value="default">Default</option><option value="deuteranopia">Deuteranopia-safe</option>
+          </select></label>
+        <label><input type="checkbox" id="set-rm"> Reduced motion</label>
+        <label><input type="checkbox" id="set-hc"> High contrast</label>
+        <label><input type="checkbox" id="set-lt"> Larger text</label>
+        <button id="set-close" class="primary">Done</button>
+      </div>
+    </section>
+
+    <!-- Help -->
+    <section id="scr-help" class="screen hidden" aria-labelledby="help-h">
+      <div class="card col">
+        <h2 id="help-h">How to play</h2>
+        <div class="col">
+          <div class="panel"><h3>Drop</h3><p>Aim along the top of the crate, release to drop the current fruit. Matching tiers merge into the next tier and score points (tier² × 5).</p></div>
+          <div class="panel"><h3>Warning line</h3><p>If settled fruit stays above the glowing line for the grace period, the run overflows and ends.</p></div>
+          <div class="panel"><h3>Controls</h3><p>Drag / aim slider, <span class="kbd">←</span><span class="kbd">→</span> aim, <span class="kbd">Space</span> drop, <span class="kbd">U</span> undo (practice), <span class="kbd">H</span> hint, <span class="kbd">P</span>/<span class="kbd">Esc</span> pause, <span class="kbd">R</span> restart.</p></div>
+          <div class="panel"><h3>Modes</h3><p><strong>Learn</strong>: guided tutorial. <strong>Journey</strong>: 40 staged goals. <strong>Daily</strong>: one ranked run per UTC day. <strong>Practice</strong>: relaxed, with undo. <strong>Challenge</strong>: preset rule variants.</p></div>
+        </div>
+        <button id="help-close" class="primary">Close</button>
+      </div>
+    </section>
+
+    <div id="aria-live" aria-live="polite"></div>
+  </div>
+</div>
+<script src="./src/rules.js"></script>
+<script type="importmap">{"imports":{"three":"./dist/three.module.min.js"}}</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
