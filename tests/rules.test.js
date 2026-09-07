@@ -60,6 +60,36 @@ test('replay: same seed + commands produce identical hashes', () => {
   assert.strictEqual(a.s.score, b.s.score);
 });
 
+// The client simulates continuously while the player thinks, so server-side
+// validation replays each command at the tick it was issued. Model both sides.
+test('replay: tick-indexed commands reproduce a continuously simulated run', () => {
+  const think = [0, 45, 200, 61, 33, 150, 90];
+  // client: steps every frame, drops when its cooldown allows
+  const client = R.newGame(2024, { difficulty: 'normal' });
+  const commands = [];
+  for (const wait of think) {
+    while (!R.legalActions(client).drop) R.step(client);
+    for (let i = 0; i < wait; i++) R.step(client);
+    const x = 4 + (commands.length * 2.5) % 12;
+    assert.ok(R.applyCommand(client, { kind: 'drop', x }));
+    commands.push({ kind: 'drop', x: R.quantizeX(x), tick: client.tick });
+  }
+  for (let i = 0; i < 400; i++) R.step(client);
+
+  // server: advance to each recorded tick, then apply
+  const server = R.newGame(2024, { difficulty: 'normal' });
+  for (const c of commands) {
+    while (server.tick < c.tick && server.status === 'active') R.step(server);
+    assert.strictEqual(server.tick, c.tick);
+    assert.ok(R.applyCommand(server, { kind: 'drop', x: c.x }));
+  }
+  while (server.tick < client.tick && server.status === 'active') R.step(server);
+
+  assert.strictEqual(server.tick, client.tick);
+  assert.strictEqual(server.score, client.score);
+  assert.strictEqual(R.stateHash(server), R.stateHash(client));
+});
+
 test('snapshot/restore round-trips and continues deterministically', () => {
   const s = R.newGame(555);
   R.applyCommand(s, { kind: 'drop', x: 6 });

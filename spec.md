@@ -80,7 +80,7 @@ The Three.js canvas fills the game region but is never the only UI. Menus, text,
 
 ### Screens and overlays
 
-- **Title/home:** Play is dominant; daily challenge, journey progress, and profile are one level below.
+- **Title/home:** Play is dominant and routes by progress — the tutorial on a first visit, the journey stage picker once it is complete — with the tutorial still reachable directly for replay; daily challenge, journey progress, and profile are one level below.
 - **Mode setup:** show rules, expected duration, player count, assists, and whether the result is ranked before commitment.
 - **Play HUD:** objective, progress, current actor/state, pause, and only context-relevant actions.
 - **Pause/settings:** resume first; audio, graphics, controls, accessibility, help, and leave are clearly separated.
@@ -170,7 +170,7 @@ No module may mutate rules state except through a validated command. Rendering c
 
 - Fixed simulation step where physics exists; quantize authoritative inputs and define stable collision/order rules.
 - Use separate seeded random streams for rules, content decoration, and audiovisual variants. Cosmetic randomness never changes rules.
-- Replay envelope: schema version, build/content version, seed, initial hash, timestamp offset, ordered commands, periodic state hashes, terminal result.
+- Replay envelope: schema version, build/content version, seed, initial hash, timestamp offset, ordered commands each stamped with the simulation tick they were issued on, final tick, periodic state hashes, terminal result. Because the client simulates continuously while the player deliberates, validation must advance the sim to each command's tick before applying it; re-deriving intermediate timing produces a different state.
 - Validate all network input for identity, session membership, turn/tick, bounds, rate, payload size, and legal action. Reject duplicates idempotently by command ID.
 - Treat client clocks, scores, inventories, roles, physics outcomes, and completion claims as untrusted in competitive contexts.
 

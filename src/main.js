@@ -205,9 +205,32 @@ let particlePool = [], particleData = [];
 let shakeAmp = 0;
 const tmpV = new THREE.Vector3();
 
+// Camera framing: keep the authored 3/4 direction, but derive the distance
+// from the viewport so the whole crate — including the drop preview above the
+// rim and the warning line — stays on screen at any aspect ratio.
+const CAM_DIR = new THREE.Vector3(...CONFIG.camPos).sub(new THREE.Vector3(...CONFIG.camTarget)).normalize();
+const CAM_TARGET = new THREE.Vector3(WORLD_W / 2, (WORLD_H + 2) / 2, 0);
+const CAM_HALF_H = (WORLD_H + 4) / 2;   // -1 .. WORLD_H + 3 (rim + ghost fruit)
+const CAM_HALF_W = (WORLD_W + 6) / 2;   // crate plus a little stall margin
+const camBase = new THREE.Vector3();
+function fitCamera() {
+  const t = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+  const dist = Math.max(CAM_HALF_H / t, CAM_HALF_W / (t * Math.max(0.2, camera.aspect))) * 1.15;
+  camBase.copy(CAM_DIR).multiplyScalar(dist).add(CAM_TARGET);
+  camera.position.copy(camBase);
+  camera.lookAt(CAM_TARGET);
+}
+
+function disposeFruitMesh(m) {
+  m.traverse(o => { o.geometry?.dispose?.(); o.material?.dispose?.(); });
+}
+
 function buildScene() {
   const q = save.settings.quality;
   renderer?.dispose?.();
+  // meshes belong to the scene we are replacing; drop them so syncMeshes rebuilds
+  for (const [, m] of fruitMeshes) disposeFruitMesh(m);
+  fruitMeshes.clear();
   renderer = new THREE.WebGLRenderer({ canvas, antialias: q !== 'low', alpha: false });
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, CONFIG.dprCap) * CONFIG.renderScale[q]);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -217,7 +240,8 @@ function buildScene() {
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0xbfe3ff);
-  scene.fog = new THREE.Fog(0xbfe3ff, 90, 220);
+  // starts beyond the furthest camera fit distance so the crate never hazes
+  scene.fog = new THREE.Fog(0xbfe3ff, 150, 320);
 
   camera = new THREE.PerspectiveCamera(CONFIG.fov, 1, 0.1, 400);
   camera.position.set(...CONFIG.camPos);
@@ -325,7 +349,7 @@ function makeFruitMesh(tier) {
 }
 
 function initParticles() {
-  for (const p of particlePool) scene.remove(p);
+  for (const p of particlePool) { p.parent?.remove(p); p.geometry.dispose(); p.material.dispose(); }
   particlePool = []; particleData = [];
   const count = CONFIG.particles[save.settings.quality];
   if (!count) return;
@@ -377,8 +401,9 @@ function resize() {
   if (!renderer) return;
   const w = stageEl.clientWidth, h = stageEl.clientHeight;
   renderer.setSize(w, h, false);
-  camera.aspect = w / Math.max(1, h);
+  camera.aspect = Math.max(1, w) / Math.max(1, h);
   camera.updateProjectionMatrix();
+  fitCamera();
 }
 window.addEventListener('resize', resize);
 
@@ -432,7 +457,7 @@ let pendingNext = null; // journey "next stage" after win
 function newRun(mode, modeOpts) {
   run.mode = mode; run.modeOpts = modeOpts;
   run.state = R.newGame(modeOpts.seed, { difficulty: modeOpts.difficulty, goals: modeOpts.goals || null });
-  run.commands = []; run.undoStack = []; run.aimX = WORLD_W / 2;
+  run.commands = []; run.undoStack = []; setAim(WORLD_W / 2);
   run.ranked = !!modeOpts.ranked; run.pausedMs = 0; run.startedAt = now();
   run.tutorial.step = mode === 'learn' ? 0 : -1;
   run.phase = 'countdown';
@@ -467,7 +492,7 @@ function resumeRun() {
   run.mode = r.mode; run.modeOpts = r.modeOpts; run.commands = r.commands || [];
   run.undoStack = []; run.state = R.restore(r.snap);
   run.ranked = !!r.modeOpts.ranked; run.pausedMs = r.pausedMs || 0;
-  run.aimX = WORLD_W / 2; run.startedAt = now();
+  setAim(WORLD_W / 2); run.startedAt = now();
   run.tutorial.step = run.mode === 'learn' ? Math.min(r.commands.length > 0 ? 1 : 0, 2) : -1;
   run.phase = 'active';
   showScreen(null); $('hud').classList.remove('hidden');
@@ -483,10 +508,14 @@ function tryDrop(x) {
   if (!legal.drop) { audio.invalid(); return; }
   // learn-mode gating: step 0 = must drop
   const qx = R.quantizeX(x);
-  if (run.mode === 'practice') run.undoStack.push(R.snapshot(run.state));
-  if (run.undoStack.length > 20) run.undoStack.shift();
+  const before = run.mode === 'practice' ? R.snapshot(run.state) : null;
   const ok = R.applyCommand(run.state, { kind: 'drop', x: qx });
   if (ok) {
+    // only snapshot accepted drops, or undo would pop a command it does not own
+    if (before) {
+      run.undoStack.push(before);
+      if (run.undoStack.length > 20) run.undoStack.shift();
+    }
     run.commands.push({ kind: 'drop', x: qx, tick: run.state.tick });
     audio.drop();
     if (run.mode === 'learn' && run.tutorial.step === 0) { run.tutorial.step = 1; updateObjective(); }
@@ -501,6 +530,7 @@ function undo() {
   run.state = R.restore(snap);
   run.commands.pop();
   announce('Undid last drop.');
+  serializeResume();
   updateHUD(true);
 }
 
@@ -512,12 +542,15 @@ function skipSettle() {
   afterStep();
 }
 
+let hintTimer = 0;
 function showHint() {
   if (!run.state || !R.legalActions(run.state).hint) { audio.invalid(); return; }
   const x = R.hint(run.state);
   hintMarker.position.set(x, WORLD_H + 0.8, 0);
   hintMarker.visible = true;
-  setTimeout(() => { hintMarker.visible = false; }, 2500);
+  clearTimeout(hintTimer);
+  const marker = hintMarker; // buildScene may swap it out before the timer fires
+  hintTimer = setTimeout(() => { marker.visible = false; }, 2500);
   announce(`Hint: drop near position ${x.toFixed(1)}.`);
 }
 
@@ -532,7 +565,10 @@ function drainEvents() {
       vibrate(30);
       shakeAmp = save.settings.reducedMotion ? 0 : Math.min(0.5, 0.1 + ev.tier * 0.03);
       announce(`Merged into ${TIER_NAMES[ev.tier]}, plus ${ev.points} points. Score ${s.score}.`);
-      if (run.mode === 'learn' && run.tutorial.step === 1) { run.tutorial.step = 2; updateObjective(); }
+      if (run.mode === 'learn' && run.tutorial.step === 1) {
+        run.tutorial.step = 2; updateObjective();
+        save.settings.tutorialDone = true; persist();
+      }
     } else if (ev.kind === 'warn') {
       audio.warn(); $('warn-banner').classList.remove('hidden');
       announce('Warning: fruit is above the line!');
@@ -552,7 +588,7 @@ function onGameOver(reason) {
   run.phase = 'resolving';
   $('warn-banner').classList.add('hidden');
   const win = reason === 'goal-complete';
-  audio.fanfare(win || reason === 'overflow');
+  audio.fanfare(win);
   vibrate(win ? [40, 60, 40] : [120]);
   const bd = R.scoreBreakdown(run.state);
   const hash = R.stateHash(run.state);
@@ -574,7 +610,8 @@ function onGameOver(reason) {
   if (run.ranked) {
     const entry = { mode: run.mode, score: bd.total, seed: run.state.seed,
       difficulty: run.state.difficulty, hash,
-      replay: { seed: run.state.seed, difficulty: run.state.difficulty, commands: run.commands },
+      replay: { seed: run.state.seed, difficulty: run.state.difficulty,
+        goals: run.state.goals || null, commands: run.commands, finalTick: run.state.tick },
       date: new Date(now()).toISOString() };
     save.leaderboard.push(entry);
     save.leaderboard.sort((a, b) => b.score - a.score);
@@ -590,8 +627,9 @@ async function submitScore(entry) {
     await fetch('/api/v1/scores', { method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: 'guest', scope: entry.mode === 'daily' ? 'daily' : 'score-chase',
-        seed: entry.seed, difficulty: entry.difficulty,
-        commands: entry.replay.commands, finalHash: entry.hash, score: entry.score }) });
+        seed: entry.seed, difficulty: entry.difficulty, goals: entry.replay.goals,
+        commands: entry.replay.commands, finalTick: entry.replay.finalTick,
+        finalHash: entry.hash, score: entry.score }) });
   } catch { /* 404/offline — local leaderboard only */ }
 }
 
@@ -631,9 +669,12 @@ function updateHUD(force) {
   if (!s) return;
   $('score-big').textContent = s.score;
   $('score-top').textContent = s.score;
+  const nowTxt = `${TIER_NAMES[s.currentTier]} (${s.currentTier})`;
   const nextTxt = `${TIER_NAMES[s.nextTier]} (${s.nextTier})`;
+  $('now-fruit').textContent = nowTxt;
+  $('now-top').textContent = `Now: ${nowTxt}`;
   $('next-fruit').textContent = nextTxt;
-  $('next-top').textContent = nextTxt;
+  $('next-top').textContent = `Next: ${nextTxt}`;
   // board list (navigable text equivalent)
   const sig = s.fruits.map(f => f.id + ':' + f.tier).join(',');
   if (force || sig !== lastBoardSig) {
@@ -686,8 +727,9 @@ function openSetup(mode) {
     const done = save.daily[d];
     add(p(`Seed from UTC date <strong>${d}</strong>. One ranked run per day; ~4 minutes.`));
     add(p(done ? `Best today: <strong>${done.score}</strong>` : 'Not attempted yet today.'));
-    starter = () => newRun('daily', { seed: R.hashStr('orchard-daily-' + d), difficulty: 'normal', ranked: true });
-    if (done) $('setup-start').textContent = 'Replay (unranked)'; else $('setup-start').textContent = 'Start';
+    // one ranked run per day: a repeat attempt is a replay, and must not submit
+    starter = () => newRun('daily', { seed: R.hashStr('orchard-daily-' + d), difficulty: 'normal', ranked: !done });
+    $('setup-start').textContent = done ? 'Replay (unranked)' : 'Start';
   } else if (mode === 'practice') {
     h.textContent = 'Practice';
     add(p('Free play with undo. Not ranked. Restart anytime.'));
@@ -770,13 +812,17 @@ function openSettings() {
 }
 function applySettings() {
   const s = save.settings;
+  const prevQuality = s.quality, prevPalette = s.palette;
   s.music = +$('set-music').value; s.sfx = +$('set-sfx').value; s.amb = +$('set-amb').value;
   s.mute = $('set-mute').checked; s.haptics = $('set-haptics').checked;
   s.quality = $('set-quality').value; s.palette = $('set-palette').value;
   s.reducedMotion = $('set-rm').checked; s.highContrast = $('set-hc').checked; s.largerText = $('set-lt').checked;
   document.body.classList.toggle('high-contrast', s.highContrast);
   document.body.classList.toggle('larger-text', s.largerText);
-  audio.applyVolumes(); persist(); buildScene(); // quality/palette take effect immediately
+  audio.applyVolumes(); persist();
+  // only these two change the scene graph; rebuilding on every volume tweak
+  // would churn the WebGL context and drop the in-flight run's meshes
+  if (s.quality !== prevQuality || s.palette !== prevPalette) buildScene();
 }
 
 // ---- pause ----
@@ -810,6 +856,13 @@ function gotoTitle() {
 }
 
 // ---------------- 6. Input ----------------
+// One aim value, two visible sliders (desktop rail + mobile thumb tray).
+function setAim(x) {
+  run.aimX = R.quantizeX(Math.max(TIER_R[1], Math.min(WORLD_W - TIER_R[1], x)));
+  $('aim-slider').value = run.aimX;
+  $('tt-aim').value = run.aimX;
+}
+
 function aimFromClientX(clientX) {
   const rect = canvas.getBoundingClientRect();
   const ndc = ((clientX - rect.left) / rect.width) * 2 - 1;
@@ -817,9 +870,7 @@ function aimFromClientX(clientX) {
   tmpV.set(ndc, 0.5, 0.5).unproject(camera);
   const dir = tmpV.sub(camera.position).normalize();
   const t = (WORLD_H - camera.position.y) / dir.y;
-  const x = camera.position.x + dir.x * t;
-  run.aimX = R.quantizeX(Math.max(TIER_R[1], Math.min(WORLD_W - TIER_R[1], x)));
-  $('aim-slider').value = run.aimX;
+  setAim(camera.position.x + dir.x * t);
 }
 
 let dragging = false, dragMoved = false;
@@ -842,7 +893,8 @@ canvas.addEventListener('pointerup', e => {
 canvas.addEventListener('pointercancel', () => { dragging = false; });
 canvas.addEventListener('lostpointercapture', () => { dragging = false; });
 
-$('aim-slider').addEventListener('input', e => { run.aimX = +e.target.value; });
+for (const id of ['aim-slider', 'tt-aim'])
+  $(id).addEventListener('input', e => setAim(+e.target.value));
 
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
@@ -852,8 +904,8 @@ document.addEventListener('keydown', e => {
     else if (run.phase === 'paused') resumeGame();
     e.preventDefault();
   } else if (run.phase === 'active') {
-    if (k === 'ArrowLeft' || k === 'a' || k === 'A') { run.aimX = R.quantizeX(Math.max(TIER_R[1], run.aimX - 0.5)); $('aim-slider').value = run.aimX; e.preventDefault(); }
-    else if (k === 'ArrowRight' || k === 'd' || k === 'D') { run.aimX = R.quantizeX(Math.min(WORLD_W - TIER_R[1], run.aimX + 0.5)); $('aim-slider').value = run.aimX; e.preventDefault(); }
+    if (k === 'ArrowLeft' || k === 'a' || k === 'A') { setAim(run.aimX - 0.5); e.preventDefault(); }
+    else if (k === 'ArrowRight' || k === 'd' || k === 'D') { setAim(run.aimX + 0.5); e.preventDefault(); }
     else if (k === ' ' || k === 'Enter') { tryDrop(run.aimX); e.preventDefault(); }
     else if (k === 'u' || k === 'U') undo();
     else if (k === 'h' || k === 'H') showHint();
@@ -869,7 +921,13 @@ for (const id of ['btn-skip', 'tt-skip']) $(id).addEventListener('click', skipSe
 for (const id of ['btn-pause', 'tt-pause']) $(id).addEventListener('click', pauseGame);
 
 // title screen
-$('bt-play').addEventListener('click', () => { audio.ensure(); audio.click(); openSetup('learn'); });
+// Play is the dominant action: first-timers get the tutorial, returning
+// players land straight on the journey stage picker.
+$('bt-play').addEventListener('click', () => {
+  audio.ensure(); audio.click();
+  openSetup(save.settings.tutorialDone ? 'journey' : 'learn');
+});
+$('bt-learn').addEventListener('click', () => openSetup('learn'));
 $('bt-daily').addEventListener('click', () => openSetup('daily'));
 $('bt-journey').addEventListener('click', () => openSetup('journey'));
 $('bt-practice').addEventListener('click', () => openSetup('practice'));
@@ -921,7 +979,7 @@ function syncMeshes(alpha) {
     m.rotation.z = -f.x * 0.05;
   }
   for (const [id, m] of fruitMeshes) {
-    if (!seen.has(id)) { scene.remove(m); fruitMeshes.delete(id); }
+    if (!seen.has(id)) { scene.remove(m); disposeFruitMesh(m); fruitMeshes.delete(id); }
   }
   // ghost preview
   if (run.phase === 'active' && R.legalActions(s).drop) {
@@ -958,11 +1016,15 @@ function frame(t) {
     syncMeshes();
     if (shakeAmp > 0.001) {
       camera.position.set(
-        CONFIG.camPos[0] + (Math.random() - 0.5) * shakeAmp,
-        CONFIG.camPos[1] + (Math.random() - 0.5) * shakeAmp,
-        CONFIG.camPos[2]);
-      camera.lookAt(...CONFIG.camTarget);
+        camBase.x + (Math.random() - 0.5) * shakeAmp,
+        camBase.y + (Math.random() - 0.5) * shakeAmp,
+        camBase.z);
+      camera.lookAt(CAM_TARGET);
       shakeAmp *= 0.85;
+    } else if (shakeAmp) {
+      shakeAmp = 0;
+      camera.position.copy(camBase);
+      camera.lookAt(CAM_TARGET);
     }
     renderer.render(scene, camera);
   }

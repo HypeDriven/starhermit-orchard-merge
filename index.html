@@ -55,9 +55,13 @@
   @media (max-width:1023px){
     #hud{grid-template-columns:1fr;grid-template-rows:auto 1fr auto;padding:6px}
     .rail{display:none}
-    #topbar{display:flex;gap:8px;pointer-events:auto;flex-wrap:wrap;align-items:center;
+    /* the desktop grid spacers would otherwise take the auto rows and push the
+       topbar into the 1fr row, where it covers (and swallows taps on) the crate */
+    #hud>div:empty{display:none}
+    #topbar{grid-row:1;align-self:start;display:flex;gap:8px;pointer-events:auto;flex-wrap:wrap;align-items:center;
       background:rgba(30,44,24,.88);border:2px solid var(--line);border-radius:var(--radius);padding:8px}
-    #thumbtray{display:flex;gap:8px;pointer-events:auto;justify-content:center;flex-wrap:wrap}
+    #thumbtray{grid-row:3;align-self:end;display:flex;gap:8px;pointer-events:auto;justify-content:center;flex-wrap:wrap}
+    #warn-banner{top:auto;bottom:calc(var(--tap) + 24px)}
   }
   @media (min-width:1024px){#thumbtray{display:none}}
   #aria-live{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
@@ -96,8 +100,10 @@
         <div class="panel" style="text-align:center">
           <div class="small muted">Score</div>
           <div id="score-big">0</div>
+          <div class="small muted">Dropping now</div>
+          <div id="now-fruit" style="font-size:1.4em">–</div>
           <div class="small muted">Next</div>
-          <div id="next-fruit" style="font-size:1.6em">–</div>
+          <div id="next-fruit" style="font-size:1.4em">–</div>
         </div>
         <div class="panel col" style="display:flex">
           <label class="slider">Aim
@@ -116,11 +122,15 @@
       </div>
       <div id="topbar">
         <strong id="score-top">0</strong>
+        <span class="badge" id="now-top">–</span>
         <span class="badge" id="next-top">–</span>
         <span class="badge" id="objective-top"></span>
       </div>
       <div></div>
       <div id="thumbtray">
+        <label class="slider" style="flex:1 1 100%">Aim
+          <input type="range" id="tt-aim" min="1" max="19" step="0.05" value="10" aria-label="Aim position">
+        </label>
         <button id="tt-drop" class="primary">Drop</button>
         <button id="tt-hint">Hint</button>
         <button id="tt-undo">Undo</button>
@@ -149,6 +159,7 @@
           <button id="bt-challenge">Challenge</button>
         </div>
         <div class="row" style="justify-content:center">
+          <button id="bt-learn">Tutorial</button>
           <button id="bt-scores">Score chase</button>
           <button id="bt-settings">Settings</button>
           <button id="bt-help">Help</button>

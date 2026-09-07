@@ -273,8 +273,9 @@ function step(s) {
       endGame(s, 'overflow');
       return;
     }
+    if (above) continue; // keep scanning for spills, the warning state is settled
     const speed = Math.abs(f.vx) + Math.abs(f.vy);
-    if (f.y + TIER_R[f.tier] * 0.5 > WARN_Y && speed < SETTLE_SPEED && f.age > 30) { above = true; break; }
+    if (f.y + TIER_R[f.tier] * 0.5 > WARN_Y && speed < SETTLE_SPEED && f.age > 30) above = true;
   }
   if (above) {
     s.aboveLineTicks++;
@@ -360,7 +361,7 @@ function restore(snap) {
   s.fruits = snap.fruits.map(f => ({ ...f }));
   s.nextId = snap.nextId; s.currentTier = snap.currentTier; s.nextTier = snap.nextTier;
   s.score = snap.score; s.mergeScore = snap.mergeScore; s.merges = snap.merges;
-  s.maxTier = snap.maxTier; s.drops = s.drops; s.drops = snap.drops;
+  s.maxTier = snap.maxTier; s.drops = snap.drops;
   s.invalidActions = snap.invalidActions; s.cooldown = snap.cooldown;
   s.aboveLineTicks = snap.aboveLineTicks; s.events = [];
   // fast-forward the rng stream to the recorded count

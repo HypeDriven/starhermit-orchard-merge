@@ -17,7 +17,7 @@ const rules = require('./src/rules.js');
 
 const ROOT = __dirname;
 const PORT = parseInt(process.argv[2] || process.env.PORT || '8080', 10);
-const DATA_DIR = path.join(ROOT, 'data');
+const DATA_DIR = process.env.OM_DATA_DIR || path.join(ROOT, 'data');
 const BOARD_FILE = path.join(DATA_DIR, 'leaderboard.json');
 
 const MIME = {
@@ -77,33 +77,51 @@ function saveBoard(board) {
 // ---- authoritative replay validation -----------------------------------------
 
 // Re-runs the submitted command log against the rules engine and verifies
-// the claimed score and the periodic/final state hashes.
+// the claimed score and the final state hash.
+//
+// The client simulates continuously (it keeps stepping while the player
+// thinks), so a command is only reproducible at the exact tick it was issued:
+// each command carries its tick and we advance the sim to it before applying.
+const MAX_REPLAY_TICKS = 200000; // ~55 minutes of simulated play
+
 function validateReplay(p) {
   if (!p || typeof p !== 'object') return { ok: false, error: 'malformed' };
+  if (typeof p.seed !== 'number' || !Number.isFinite(p.seed)) return { ok: false, error: 'bad-seed' };
   const seed = p.seed >>> 0;
-  if (!Number.isInteger(seed)) return { ok: false, error: 'bad-seed' };
   const difficulty = rules.DROP_POOLS[p.difficulty] ? p.difficulty : null;
   if (!difficulty) return { ok: false, error: 'bad-difficulty' };
   if (!Array.isArray(p.commands) || p.commands.length > 5000) return { ok: false, error: 'bad-commands' };
   if (!Number.isInteger(p.score) || p.score < 0 || p.score > 1e9) return { ok: false, error: 'bad-score' };
+  if (p.finalTick != null && (!Number.isInteger(p.finalTick) || p.finalTick < 0 || p.finalTick > MAX_REPLAY_TICKS)) {
+    return { ok: false, error: 'bad-final-tick' };
+  }
 
   const s = rules.newGame(seed, { difficulty, goals: p.goals || null });
-  const hashes = [];
+  const advanceTo = (tick) => {
+    if (tick > MAX_REPLAY_TICKS) return false;
+    while (s.tick < tick && s.status === 'active') rules.step(s);
+    return true;
+  };
+
   for (const cmd of p.commands) {
-    if (!cmd || cmd.kind !== 'drop' || typeof cmd.x !== 'number') return { ok: false, error: 'bad-command' };
+    if (!cmd || cmd.kind !== 'drop' || typeof cmd.x !== 'number' || !Number.isFinite(cmd.x)) {
+      return { ok: false, error: 'bad-command' };
+    }
+    if (!Number.isInteger(cmd.tick) || cmd.tick < s.tick) return { ok: false, error: 'bad-command-tick' };
+    if (!advanceTo(cmd.tick)) return { ok: false, error: 'replay-too-long' };
+    if (s.status !== 'active') return { ok: false, error: 'illegal-command' };
     if (!rules.applyCommand(s, { kind: 'drop', x: cmd.x })) return { ok: false, error: 'illegal-command' };
-    rules.settle(s, 3600);
-    if (s.status !== 'active') break;
-    hashes.push(rules.stateHash(s));
   }
-  // no tail simulation: the submitted finalHash is the state after the last
-  // command's settle, which is exactly what we replayed above.
+  // tail simulation up to the tick the client reported as final
+  if (Number.isInteger(p.finalTick) && !advanceTo(p.finalTick)) {
+    return { ok: false, error: 'replay-too-long' };
+  }
 
   if (Number.isInteger(p.finalHash) && p.finalHash !== rules.stateHash(s)) {
     return { ok: false, error: 'hash-mismatch' };
   }
   if (p.score !== s.score) return { ok: false, error: 'score-mismatch' };
-  return { ok: true, score: s.score, ticks: s.tick, drops: s.drops, maxTier: s.maxTier, hashes };
+  return { ok: true, score: s.score, ticks: s.tick, drops: s.drops, maxTier: s.maxTier };
 }
 
 // ---- HTTP server ---------------------------------------------------------------
@@ -126,7 +144,8 @@ const server = http.createServer(async (req, res) => {
   if (u.pathname === '/api/v1/scores' && req.method === 'POST') {
     let body;
     try { body = await readJsonBody(req); }
-    catch (e) { return send(res, 413, { error: e.message }); }
+    catch (e) { return send(res, e.message === 'payload-too-large' ? 413 : 400, { error: e.message }); }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return send(res, 400, { error: 'bad-body' });
     const replay = body.replay || body;
     if (body.scope === 'daily') {
       const today = new Date().toISOString().slice(0, 10);
@@ -170,10 +189,14 @@ const server = http.createServer(async (req, res) => {
 
   // static files (distribution root)
   if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, { error: 'method-not-allowed' });
-  let rel = decodeURIComponent(u.pathname);
+  let rel;
+  try { rel = decodeURIComponent(u.pathname); }
+  catch { return send(res, 400, { error: 'bad-path' }); }
   if (rel === '/') rel = '/index.html';
+  if (rel.includes('\0')) { res.writeHead(400); return res.end(); }
   const file = path.normalize(path.join(ROOT, rel));
-  if (!file.startsWith(ROOT)) { res.writeHead(403); return res.end(); }
+  // startsWith(ROOT) alone would also accept a sibling directory sharing the prefix
+  if (file !== ROOT && !file.startsWith(ROOT + path.sep)) { res.writeHead(403); return res.end(); }
   fs.stat(file, (err, st) => {
     if (err || !st.isFile()) { res.writeHead(404); return res.end('not found'); }
     res.writeHead(200, {
