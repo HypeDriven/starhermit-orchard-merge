@@ -17,9 +17,23 @@ const CONFIG = {
 // distinct color per tier; marker = number of little leaves (colorblind-safe cue)
 const PALETTES = {
   default:      [null,'#ff5a5a','#ff9440','#ffd23f','#a3e048','#37c871','#34c6c9','#4d8dff','#8a6fe8','#d96bd0','#ff7ab0'],
+  citrus:       [null,'#e8483f','#f27038','#f79d2f','#ffb627','#ffd23f','#f4e04d','#a8c256','#6a9c59','#3e7c4f','#2f5d3a'],
+  pastel:       [null,'#f4a9b8','#f6bd97','#f9e29c','#c8e6a0','#9dd8b0','#a0d8d8','#a3c4f3','#b8a9e8','#d8b4e2','#efb9d4'],
+  'night-orchard': [null,'#b33951','#c2543a','#d07a2e','#d69f2d','#b8b52e','#7fb069','#3d9971','#2f7f8f','#3a5fa8','#5a3d8f'],
   deuteranopia: [null,'#d55e00','#e69f00','#f0e442','#009e73','#56b4e9','#0072b2','#332288','#cc79a7','#88ccee','#ffffff'],
 };
 const TIER_NAMES = [null,'Cherry','Strawberry','Plum','Orange','Apple','Pear','Peach','Grapefruit','Melon','Pumpkin'];
+
+// Small static achievement set (spec §6): first completion, mechanic mastery,
+// a sustained streak, a difficult content milestone, and a long-term goal.
+// Keys are stable lowercase identifiers; unlocks are idempotent.
+const ACHIEVEMENTS = {
+  'first-completion': 'First harvest — complete any run',
+  'merge-master': 'Mechanic mastery — merge up to tier 8',
+  'daily-streak-3': 'Regular picker — play the daily on 3 different days',
+  'journey-complete': 'Milestone — clear journey stage 40',
+  'orchard-keeper': 'Long game — 25,000 lifetime points',
+};
 
 // ---------------- 2. Persistence ----------------
 const SAVE_KEY = 'orchard-merge-save-v1';
@@ -52,6 +66,15 @@ function loadSave() {
   } catch { return defaultSave(); }
 }
 let save = loadSave();
+save.achievements = save.achievements || {};   // added after v1 saves shipped; checksum tolerates it
+save.lifetime = save.lifetime || 0;
+function unlock(key) {
+  if (!ACHIEVEMENTS[key] || save.achievements[key]) return false;
+  save.achievements[key] = new Date(now()).toISOString();
+  announce(`Achievement unlocked: ${ACHIEVEMENTS[key]}.`);
+  run.newAchievements.push(key);
+  return true;
+}
 function persist() {
   try {
     const d = { ...save, sum: 0 };
@@ -460,6 +483,7 @@ function newRun(mode, modeOpts) {
   run.commands = []; run.undoStack = []; setAim(WORLD_W / 2);
   run.ranked = !!modeOpts.ranked; run.pausedMs = 0; run.startedAt = now();
   run.tutorial.step = mode === 'learn' ? 0 : -1;
+  run.newAchievements = [];
   run.phase = 'countdown';
   save.resume = null; persist();
   showScreen(null);
@@ -494,6 +518,7 @@ function resumeRun() {
   run.ranked = !!r.modeOpts.ranked; run.pausedMs = r.pausedMs || 0;
   setAim(WORLD_W / 2); run.startedAt = now();
   run.tutorial.step = run.mode === 'learn' ? Math.min(r.commands.length > 0 ? 1 : 0, 2) : -1;
+  run.newAchievements = [];
   run.phase = 'active';
   showScreen(null); $('hud').classList.remove('hidden');
   const away = Math.max(0, now() - r.savedAt);
@@ -565,6 +590,7 @@ function drainEvents() {
       vibrate(30);
       shakeAmp = save.settings.reducedMotion ? 0 : Math.min(0.5, 0.1 + ev.tier * 0.03);
       announce(`Merged into ${TIER_NAMES[ev.tier]}, plus ${ev.points} points. Score ${s.score}.`);
+      if (ev.tier >= 8) unlock('merge-master');
       if (run.mode === 'learn' && run.tutorial.step === 1) {
         run.tutorial.step = 2; updateObjective();
         save.settings.tutorialDone = true; persist();
@@ -601,12 +627,17 @@ function onGameOver(reason) {
     save.journey.cleared[i] = Math.max(save.journey.cleared[i] || 0, bd.total);
     save.journey.unlocked = Math.max(save.journey.unlocked, Math.min(i + 2, 40));
     pendingNext = i + 1 < 40 ? i + 1 : null;
+    if (i === 39) unlock('journey-complete');
   }
   if (run.mode === 'daily') {
     const d = utcDateStr();
     const prev = save.daily[d]?.score || 0;
     if (bd.total > prev) save.daily[d] = { score: bd.total, hash };
+    if (Object.keys(save.daily).length >= 3) unlock('daily-streak-3');
   }
+  save.lifetime += bd.total;
+  unlock('first-completion');
+  if (save.lifetime >= 25000) unlock('orchard-keeper');
   if (run.ranked) {
     const entry = { mode: run.mode, score: bd.total, seed: run.state.seed,
       difficulty: run.state.difficulty, hash,
@@ -795,6 +826,12 @@ function showResults(reason, bd) {
     <tr><td>Ticks</td><td>${bd.ticks}</td></tr>
     <tr><td>Final hash</td><td><code>${run.lastHash.toString(16)}</code></td></tr>
   </table>`;
+  const totalAch = Object.keys(ACHIEVEMENTS).length;
+  const got = Object.keys(save.achievements).length;
+  const fresh = (run.newAchievements || []).map(k => `<li>🏅 ${ACHIEVEMENTS[k]}</li>`).join('');
+  $('res-achievements').innerHTML =
+    `<p class="small muted">Achievements: ${got}/${totalAch} unlocked.</p>` +
+    (fresh ? `<ul class="small">${fresh}</ul>` : '');
   $('br-next').classList.toggle('hidden', !pendingNext);
   announce(`${$('res-h').textContent} Final score ${bd.total}.`);
   showScreen('scr-results');
