@@ -1190,14 +1190,22 @@ function setAim(x) {
   $('tt-aim').value = run.aimX;
 }
 
-function aimFromClientX(clientX) {
+function aimFromClientX(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
-  const ndc = ((clientX - rect.left) / rect.width) * 2 - 1;
-  // unproject a ray to the top plane (y = WORLD_H)
-  tmpV.set(ndc, 0.5, 0.5).unproject(camera);
+  const nx = ((clientX - rect.left) / rect.width) * 2 - 1;
+  // Use the real pointer position and intersect the fruit plane (z = 0), so
+  // the drop lands under the pointer regardless of camera tilt or aspect.
+  const ny = clientY == null ? 0.5 : -(((clientY - rect.top) / rect.height) * 2 - 1);
+  tmpV.set(nx, ny, 0.5).unproject(camera);
   const dir = tmpV.sub(camera.position).normalize();
-  const t = (WORLD_H - camera.position.y) / dir.y;
-  setAim(camera.position.x + dir.x * t);
+  let x;
+  if (Math.abs(dir.z) > 1e-4) {
+    const t = (0 - camera.position.z) / dir.z;
+    x = camera.position.x + dir.x * t;
+  } else {
+    x = camera.position.x;
+  }
+  setAim(x);
 }
 
 let dragging = false, dragMoved = false;
@@ -1206,16 +1214,16 @@ canvas.addEventListener('pointerdown', e => {
   audio.ensure();
   dragging = true; dragMoved = false;
   canvas.setPointerCapture(e.pointerId);
-  aimFromClientX(e.clientX);
+  aimFromClientX(e.clientX, e.clientY);
 });
 canvas.addEventListener('pointermove', e => {
-  if (dragging && run.phase === 'active') { dragMoved = true; aimFromClientX(e.clientX); }
+  if (dragging && run.phase === 'active') { dragMoved = true; aimFromClientX(e.clientX, e.clientY); }
 });
 canvas.addEventListener('pointerup', e => {
   if (!dragging) return;
   dragging = false;
   try { canvas.releasePointerCapture(e.pointerId); } catch {}
-  if (run.phase === 'active') { aimFromClientX(e.clientX); tryDrop(run.aimX); }
+  if (run.phase === 'active') { aimFromClientX(e.clientX, e.clientY); tryDrop(run.aimX); }
 });
 canvas.addEventListener('pointercancel', () => { dragging = false; });
 canvas.addEventListener('lostpointercapture', () => { dragging = false; });
