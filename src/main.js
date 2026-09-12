@@ -2,6 +2,7 @@
 // 1. Config & palettes  2. Persistence  3. Audio  4. Three.js scene
 // 5. Game session (modes, journey, replay)  6. Input  7. Screens/UI  8. Main loop
 import * as THREE from 'three';
+import { zipStore, unzipFirstEntry, bytesToBase64 } from './zip.js';
 
 const R = globalThis.OrchardRules;
 const { STEP_MS, WORLD_W, WORLD_H, WARN_Y, TIER_R } = R;
@@ -82,22 +83,239 @@ function persist() {
     save.sum = d.sum;
     localStorage.setItem(SAVE_KEY, JSON.stringify(d));
   } catch { /* storage full/blocked — play on without persistence */ }
+  platform.scheduleCloudPush();
 }
 
-// Host time offset (optional): GET /api/v1/time, adjusted for round trip.
-let timeOffsetMs = 0;
-async function syncServerTime() {
-  try {
-    const t0 = Date.now();
-    const res = await fetch('/api/v1/time');
-    const t1 = Date.now();
-    if (!res.ok) return;
-    const j = await res.json();
-    const serverMs = typeof j === 'number' ? j : (j.now ?? j.time ?? j.ms);
-    if (typeof serverMs === 'number') timeOffsetMs = serverMs - (t0 + t1) / 2;
-  } catch { /* offline — use local clock silently */ }
+// ---------------- 2b. StarHermit platform adapter ----------------
+// Token-aware same-origin API client with graceful offline fallback. Hosted
+// mode activates iff a launch token was read from the URL fragment.
+const SYNC_LABELS = {
+  saving: 'cloud save: saving…',
+  synced: 'cloud save: synced',
+  error: 'cloud save unreachable — progress is safe on this device',
+  offline: 'connecting…',
+};
+
+// Launch token: `#game_token=<jwt>` (optional `&session_id=`), read once and
+// stripped. Query-param fallbacks exist for local dev only.
+function readLaunchToken() {
+  let token = null;
+  if (window.location.hash.length > 1) {
+    const params = new URLSearchParams(window.location.hash.slice(1));
+    token = params.get('game_token');
+    if (token) {
+      params.delete('game_token');
+      const rest = params.toString();
+      history.replaceState(null, '', window.location.pathname + window.location.search + (rest ? '#' + rest : ''));
+    }
+  }
+  if (!token) {
+    const q = new URLSearchParams(window.location.search);
+    token = q.get('game_token') || q.get('token') || q.get('launch') || q.get('launch_token');
+  }
+  return token;
 }
-const now = () => Date.now() + timeOffsetMs;
+
+// JWT payload decode (no verify): sub = user id, game_scope = this game's slug.
+function decodeLaunchToken(token) {
+  try {
+    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const json = JSON.parse(atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4)));
+    return { sub: json.sub, slug: json.game_scope };
+  } catch { return {}; }
+}
+
+const launchToken = readLaunchToken();
+const claims = launchToken ? decodeLaunchToken(launchToken) : {};
+
+const platform = {
+  timeOffsetMs: 0,            // server - client, ms
+  online: false,
+  token: launchToken,
+  sub: claims.sub || null,
+  slug: claims.slug || null,
+  hosted: !!(launchToken && claims.sub && claims.slug),
+  nickname: null,
+  syncState: 'offline',       // offline | saving | synced | error
+  _pushTimer: null, _pushing: false, _adopting: false,
+  _lastSig: null, _refreshTimer: null,
+  _profileCache: new Map(),
+
+  authHeaders() {
+    return this.token ? { Authorization: 'Bearer ' + this.token } : {};
+  },
+  setSync(state) {
+    this.syncState = state;
+    updateProfileLine();
+  },
+  now() { return Date.now() + this.timeOffsetMs; },
+
+  // Round-trip-adjusted server clock for dailies and timestamps.
+  async fetchTime() {
+    try {
+      const t0 = Date.now();
+      const res = await fetch('/api/v1/time', { headers: this.authHeaders() });
+      const t1 = Date.now();
+      if (!res.ok) return;
+      const j = await res.json();
+      const serverMs = typeof j === 'number' ? j : (j.now ?? j.time ?? j.ms);
+      if (typeof serverMs === 'number') this.timeOffsetMs = serverMs - (t0 + t1) / 2;
+      this.online = true;
+    } catch { this.online = false; }
+  },
+  async get(path) {
+    const res = await fetch(path, { headers: this.authHeaders() });
+    if (res.status === 429) throw new Error('rate-limited');
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'request-failed');
+    return data;
+  },
+  async post(path, body) {
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
+      body: JSON.stringify(body),
+    });
+    if (res.status === 429) throw new Error('rate-limited');
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'request-failed');
+    return data;
+  },
+
+  // Nickname from the user profile; NEVER /api/v1/me, never usernames.
+  async fetchNickname(userId) {
+    if (this._profileCache.has(userId)) return this._profileCache.get(userId);
+    let name = 'Player ' + String(userId).slice(0, 8);
+    try {
+      const data = await this.get('/api/v1/users/' + userId + '/profile');
+      if (data && typeof data.nickname === 'string' && data.nickname) name = data.nickname;
+    } catch { /* keep fallback */ }
+    this._profileCache.set(userId, name);
+    return name;
+  },
+  async fetchProfile() {
+    this.nickname = await this.fetchNickname(this.sub);
+    updateProfileLine();
+  },
+
+  // Token lifetime is 60 min; re-mint scoped tokens every 45 min, retry ~60 s.
+  async refreshToken() {
+    clearTimeout(this._refreshTimer);
+    if (!this.hosted) return;
+    try {
+      const data = await this.post('/api/v1/games/' + this.slug + '/launch-token', {});
+      if (data && typeof data.token === 'string' && data.token) this.token = data.token;
+      this._refreshTimer = setTimeout(() => this.refreshToken(), 45 * 60 * 1000);
+    } catch {
+      this._refreshTimer = setTimeout(() => this.refreshToken(), 60 * 1000);
+    }
+  },
+
+  // ---- cloud save: ONE slot, zip+base64. localStorage stays the offline
+  // cache; the cloud slot is a mirror and wins on load conflict. ----
+  buildSaveDoc() {
+    const { sum, ...rest } = save;
+    return { version: SAVE_VERSION, savedAt: new Date().toISOString(), save: rest };
+  },
+  saveSignature(doc) { return JSON.stringify(doc.save); },
+  scheduleCloudPush() {
+    if (!this.hosted || this._adopting) return;
+    clearTimeout(this._pushTimer);
+    this.setSync('saving');
+    this._pushTimer = setTimeout(() => this.flushCloud(), 2000);
+  },
+  async flushCloud() {
+    if (!this.hosted || this._pushing) return;
+    clearTimeout(this._pushTimer);
+    const doc = this.buildSaveDoc();
+    const sig = this.saveSignature(doc);
+    if (sig === this._lastSig && this.syncState === 'synced') return;
+    this._pushing = true;
+    try {
+      const bytes = zipStore('save.json', new TextEncoder().encode(JSON.stringify(doc)));
+      const res = await fetch('/api/v1/me/cloud-saves/' + this.slug, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
+        body: JSON.stringify({ dataBase64: bytesToBase64(bytes) }),
+        keepalive: true,
+      });
+      if (!res.ok) throw new Error('cloud-save-failed');
+      this._lastSig = sig;
+      this.setSync('synced');
+    } catch {
+      this.setSync('error');
+    } finally {
+      this._pushing = false;
+    }
+  },
+  async loadCloud() {
+    if (!this.hosted) return;
+    try {
+      const res = await fetch('/api/v1/me/cloud-saves/' + this.slug, { headers: this.authHeaders() });
+      if (res.status === 404) {   // no remote save yet: push the local doc
+        this._lastSig = null;
+        await this.flushCloud();
+        return;
+      }
+      if (!res.ok) throw new Error('cloud-load-failed');
+      const doc = JSON.parse(new TextDecoder().decode(unzipFirstEntry(new Uint8Array(await res.arrayBuffer()))));
+      if (!doc || typeof doc !== 'object' || !doc.save || typeof doc.save !== 'object' || !doc.save.settings) {
+        throw new Error('bad-cloud-doc');
+      }
+      this.adoptRemote(doc);
+      this.setSync('synced');
+    } catch {
+      this.setSync('error');
+    }
+  },
+  adoptRemote(doc) {
+    this._adopting = true;
+    try {
+      const prevQuality = save.settings.quality, prevPalette = save.settings.palette;
+      for (const k of Object.keys(save)) delete save[k];
+      Object.assign(save, JSON.parse(JSON.stringify(doc.save)));
+      save.achievements = save.achievements || {};
+      save.lifetime = save.lifetime || 0;
+      save.version = SAVE_VERSION;
+      persist();               // rewrites the local cache; push skipped while adopting
+      this._lastSig = this.saveSignature(this.buildSaveDoc());
+      applySettingsOnlyLooks();
+      audio.applyVolumes();
+      if (save.settings.quality !== prevQuality || save.settings.palette !== prevPalette) buildScene();
+      gotoTitle();
+    } finally {
+      this._adopting = false;
+    }
+  },
+
+  // Read-only platform leaderboard; null when none exists or unreachable.
+  // Clients can never submit to it (script/elo-owned per the wiki).
+  async fetchLeaderboard(pageSize = 50) {
+    if (!this.hosted) return null;
+    try {
+      const game = await this.get('/api/v1/games/' + this.slug);
+      if (!game || !game.leaderboardId) return null;
+      const data = await this.get('/api/v1/leaderboards/' + game.leaderboardId +
+        '/entries?friendsOnly=&page=1&pageSize=' + pageSize);
+      const entries = data.entries || data.items || [];
+      const rows = [];
+      for (let i = 0; i < entries.length; i++) {
+        const e = entries[i];
+        const id = e.userId || e.user_id || null;
+        rows.push({
+          rank: e.rank != null ? e.rank : i + 1,
+          name: id ? await this.fetchNickname(id) : (e.name || 'Player'),
+          score: e.score,
+        });
+      }
+      return rows;
+    } catch { return null; }
+  },
+};
+
+// Host time offset comes from the platform clock (see §6 of the spec).
+async function syncServerTime() { await platform.fetchTime(); }
+const now = () => platform.now();
 const utcDateStr = () => new Date(now()).toISOString().slice(0, 10);
 
 // ---------------- 3. Audio (sampled one-shots + synthesized fallbacks) ----------------
@@ -654,14 +872,22 @@ function onGameOver(reason) {
 }
 
 async function submitScore(entry) {
+  // Its-backend replay-validated board (live only when the platform hosts
+  // server.js behind /api); otherwise fall back to the local leaderboard.
   try {
-    await fetch('/api/v1/scores', { method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'guest', scope: entry.mode === 'daily' ? 'daily' : 'score-chase',
-        seed: entry.seed, difficulty: entry.difficulty, goals: entry.replay.goals,
-        commands: entry.replay.commands, finalTick: entry.replay.finalTick,
-        finalHash: entry.hash, score: entry.score }) });
-  } catch { /* 404/offline — local leaderboard only */ }
+    const resp = await platform.post('/api/v1/scores', {
+      name: platform.nickname || 'guest',
+      scope: entry.mode === 'daily' ? 'daily' : 'score-chase',
+      seed: entry.seed, difficulty: entry.difficulty, goals: entry.replay.goals,
+      commands: entry.replay.commands, finalTick: entry.replay.finalTick,
+      finalHash: entry.hash, score: entry.score });
+    if (resp && resp.rank) {
+      $('res-submit').textContent =
+        `Submitted — rank #${resp.rank} on the ${entry.mode === 'daily' ? 'daily' : 'score-chase'} board.`;
+    }
+  } catch {
+    $('res-submit').textContent = 'Leaderboard unavailable — score kept locally.';
+  }
 }
 
 // ---------------- 7. Screens / UI ----------------
@@ -793,6 +1019,54 @@ function openSetup(mode) {
   showScreen('scr-setup');
 }
 
+function addBoard(body, title, headers, rows) {
+  const h = document.createElement('h3');
+  h.textContent = title;
+  body.appendChild(h);
+  const t = document.createElement('table');
+  const hr = document.createElement('tr');
+  for (const col of headers) { const th = document.createElement('th'); th.textContent = col; hr.appendChild(th); }
+  const thead = document.createElement('thead');
+  thead.appendChild(hr);
+  const tb = document.createElement('tbody');
+  for (const row of rows) {
+    const tr = document.createElement('tr');
+    for (const v of row) { const td = document.createElement('td'); td.textContent = String(v); tr.appendChild(td); }
+    tb.appendChild(tr);
+  }
+  t.append(thead, tb);
+  body.appendChild(t);
+}
+
+async function renderRemoteBoards(body) {
+  // Hosted: the platform leaderboard is read-only per the wiki.
+  if (platform.hosted) {
+    const rows = await platform.fetchLeaderboard();
+    if (rows && rows.length) {
+      addBoard(body, 'Global board (read-only)', ['#', 'Player', 'Score'],
+        rows.map(r => [r.rank, r.name, r.score]));
+    }
+  }
+  // Its-backend replay-validated boards (shared server clock); they exist
+  // only when server.js is hosted behind /api, so failures stay silent.
+  if (platform.online || !platform.hosted) {
+    try {
+      const data = await platform.get('/api/v1/scores?scope=score-chase');
+      const entries = (data.entries || []).slice(0, 20);
+      if (entries.length) {
+        addBoard(body, 'Server board — score chase (validated)', ['#', 'Player', 'Score', 'Date'],
+          entries.map((e, i) => [i + 1, e.name, e.score, (e.at ? new Date(e.at).toISOString().slice(0, 10) : '—')]));
+      }
+      const dd = await platform.get('/api/v1/scores?scope=daily');
+      const daily = (dd.entries || []).slice(0, 20);
+      if (daily.length) {
+        addBoard(body, 'Server board — today’s daily (validated)', ['#', 'Player', 'Score'],
+          daily.map((e, i) => [i + 1, e.name, e.score]));
+      }
+    } catch { /* its-backend not hosted here — local board above is it */ }
+  }
+}
+
 function renderLeaderboard(body) {
   const p = document.createElement('p');
   p.textContent = 'Local best runs (top 50 across modes). Replay data stored with each entry.';
@@ -809,6 +1083,7 @@ function renderLeaderboard(body) {
   if (!save.leaderboard.length) tb.innerHTML = '<tr><td colspan="6" class="muted">No ranked runs yet.</td></tr>';
   t.appendChild(tb);
   body.appendChild(t);
+  renderRemoteBoards(body);
 }
 
 function showResults(reason, bd) {
@@ -832,6 +1107,7 @@ function showResults(reason, bd) {
   $('res-achievements').innerHTML =
     `<p class="small muted">Achievements: ${got}/${totalAch} unlocked.</p>` +
     (fresh ? `<ul class="small">${fresh}</ul>` : '');
+  $('res-submit').textContent = '';
   $('br-next').classList.toggle('hidden', !pendingNext);
   announce(`${$('res-h').textContent} Final score ${bd.total}.`);
   showScreen('scr-results');
@@ -888,8 +1164,22 @@ function gotoTitle() {
     $('away-line').textContent = `While you were away: ${mins} minute${mins === 1 ? '' : 's'} since your last run.`;
     $('away-line').classList.remove('hidden');
   } else $('away-line').classList.add('hidden');
+  updateProfileLine();
   run.phase = 'title';
   showScreen('scr-title');
+}
+
+// Name/sync status slot on the title screen. Nickname comes from the platform
+// profile; guest play is unchanged.
+function updateProfileLine() {
+  const el = $('profile-line');
+  if (!el) return;
+  if (platform.hosted) {
+    el.textContent = 'Playing as ' + (platform.nickname || '…') + ' — ' +
+      (SYNC_LABELS[platform.syncState] || 'Signed in.');
+  } else {
+    el.textContent = 'Guest — progress is stored on this device.';
+  }
 }
 
 // ---------------- 6. Input ----------------
@@ -1074,6 +1364,7 @@ function afterStep() {
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && run.phase === 'active') serializeResume();
+  if (document.hidden) platform.flushCloud();   // debounced cloud mirror, if hosted
   lastT = performance.now();
 });
 
@@ -1084,6 +1375,12 @@ function applySettingsOnlyLooks() {
   document.body.classList.toggle('larger-text', save.settings.largerText);
 }
 syncServerTime();
+if (platform.hosted) {
+  platform.fetchProfile();
+  platform.loadCloud();
+  platform.refreshToken();
+  window.addEventListener('pagehide', () => platform.flushCloud());
+}
 buildScene();
 gotoTitle();
 requestAnimationFrame(t => { lastT = t; requestAnimationFrame(frame); });
