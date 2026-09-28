@@ -114,7 +114,7 @@ async function runPass(browser, vp, port) {
   const errors = [];
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
   page.on('console', (m) => {
-    if (m.type() === 'error' && !browserNoise.test(m.text())) errors.push(`console: ${m.text()}`);
+    if ((m.type() === 'error' || m.type() === 'warning') && !browserNoise.test(m.text())) errors.push(`console ${m.type()}: ${m.text()}`);
   });
 
   // One drop iteration, all through visible controls. Returns once per drop.
@@ -147,6 +147,57 @@ async function runPass(browser, vp, port) {
       await visible(page, '#scr-title');
       await page.waitForSelector('#bt-play', { state: 'visible' });
       await page.screenshot({ path: SHOT('title', vp) });
+    });
+
+    await step(`[${vp}] graphics settings: presets, override, persistence`, async () => {
+      const presetIs = (p) => page.waitForFunction((p) => document.getElementById('gl').dataset.gfxPreset === p, p, { timeout: 20000 });
+      const summary = () => page.textContent('#gfx-summary');
+      await page.click('#bt-settings');
+      await visible(page, '#scr-settings');
+      await page.locator('#gfx-section').scrollIntoViewIfNeeded();
+      // Auto is the default and names the detected tier (software GL in headless Chrome → Low)
+      if ((await page.inputValue('#set-quality')) !== 'auto') throw new Error('graphics preset should default to Auto');
+      const autoLabel = await page.locator('#set-quality option[value="auto"]').textContent();
+      if (!/^Auto \(detected: (Low|Balanced|High|Ultra)\)$/.test(autoLabel)) throw new Error(`auto label "${autoLabel}"`);
+      const cats = await page.locator('#gfx-cats select[data-gfx-cat]').count();
+      if (cats < 8) throw new Error(`expected graphics category selects, got ${cats}`);
+      await page.selectOption('#set-quality', 'low');
+      await presetIs('low');
+      if (!/no shadows/.test(await summary())) throw new Error(`low summary: ${await summary()}`);
+      await page.selectOption('#set-quality', 'high');
+      await presetIs('high');
+      if (!/bloom/.test(await summary())) throw new Error(`high summary lacks bloom: ${await summary()}`);
+      const fromPreset = await page.locator('#gfx-bloom option[value="preset"]').textContent();
+      if (fromPreset !== 'From preset (On)') throw new Error(`bloom preset label "${fromPreset}"`);
+      // one override, applied live
+      await page.selectOption('#gfx-bloom', 'off');
+      await page.waitForFunction(() => !/bloom/.test(document.getElementById('gfx-summary').textContent));
+      // Ultra renders cleanly, and choosing a preset clears overrides
+      await page.selectOption('#set-quality', 'ultra');
+      await presetIs('ultra');
+      await page.waitForTimeout(1500);
+      if ((await page.inputValue('#gfx-bloom')) !== 'preset') throw new Error('preset change did not clear the override');
+      await page.selectOption('#set-quality', 'high');
+      await page.selectOption('#gfx-bloom', 'off');
+      await page.check('#gfx-fps');
+      await page.waitForSelector('#fps-meter:not([hidden])', { state: 'attached' });
+      await page.screenshot({ path: SHOT('graphics', vp) });
+      // survives a reload
+      await page.reload({ waitUntil: 'load' });
+      await visible(page, '#scr-title');
+      await presetIs('high');
+      await page.click('#bt-settings');
+      await visible(page, '#scr-settings');
+      if ((await page.inputValue('#set-quality')) !== 'high') throw new Error('preset not persisted');
+      if ((await page.inputValue('#gfx-bloom')) !== 'off') throw new Error('override not persisted');
+      if (!(await page.isChecked('#gfx-fps'))) throw new Error('frame-rate toggle not persisted');
+      // back to Low (cheap under software GL) for the playthrough
+      await page.uncheck('#gfx-fps');
+      await page.selectOption('#set-quality', 'low');
+      await presetIs('low');
+      if ((await page.inputValue('#gfx-bloom')) !== 'preset') throw new Error('override survived preset change');
+      await page.click('#set-close');
+      await visible(page, '#scr-title');
     });
 
     await step(`[${vp}] settings open/change/close`, async () => {
@@ -248,7 +299,7 @@ let browser = null;
 try {
   browser = await chromium.launch({
     executablePath: '/usr/bin/google-chrome',
-    args: ['--no-sandbox', '--enable-unsafe-swiftshader'],
+    args: ['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
   });
   await runPass(browser, 'desktop', PORT);
   await runPass(browser, 'mobile', PORT);

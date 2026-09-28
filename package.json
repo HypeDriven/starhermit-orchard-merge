@@ -5,7 +5,7 @@
   "main": "index.js",
   "private": true,
   "scripts": {
-    "test": "node --test tests/rules.test.js tests/server.test.js",
+    "test": "node --test tests/rules.test.js tests/server.test.js tests/gfx.test.js",
     "test:e2e": "node tests/e2e.mjs",
     "start": "node server.js"
   },
