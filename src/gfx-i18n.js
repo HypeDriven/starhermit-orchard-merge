@@ -2,6 +2,7 @@
 // this panel picks its locale from navigator.language (see pickLocale).
 
 const EN = {
+  sh_signIn: 'Sign in with StarHermit', sh_signInHint: 'Sync your progress and settings.', sh_invite: 'Invite a friend', sh_inviteHint: 'Copy your invite link.', sh_copied: 'Invite link copied to the clipboard.', sh_copyFailed: 'Could not copy the invite link.', sh_signedOut: 'Signed out — playing locally.',
   graphics: 'Graphics', quality: 'Quality', auto: 'Auto (detected: {tier})',
   tier_low: 'Low', tier_balanced: 'Balanced', tier_high: 'High', tier_ultra: 'Ultra',
   scale: 'Render scale', fromPreset: 'From preset ({tier})',
@@ -19,6 +20,7 @@ const EN = {
 };
 
 const ES = {
+  sh_signIn: 'Iniciar sesión con StarHermit', sh_signInHint: 'Sincroniza tu progreso y tus ajustes.', sh_invite: 'Invitar a un amigo', sh_inviteHint: 'Copia tu enlace de invitación.', sh_copied: 'Enlace de invitación copiado al portapapeles.', sh_copyFailed: 'No se pudo copiar el enlace de invitación.', sh_signedOut: 'Sesión cerrada: juegas en modo local.',
   graphics: 'Gráficos', quality: 'Calidad', auto: 'Automática (detectada: {tier})',
   tier_low: 'Baja', tier_balanced: 'Equilibrada', tier_high: 'Alta', tier_ultra: 'Ultra',
   scale: 'Escala de renderizado', fromPreset: 'Según calidad ({tier})',
@@ -36,6 +38,7 @@ const ES = {
 };
 
 const FR = {
+  sh_signIn: 'Se connecter avec StarHermit', sh_signInHint: 'Synchronisez progression et réglages.', sh_invite: 'Inviter un ami', sh_inviteHint: 'Copier votre lien d’invitation.', sh_copied: 'Lien d’invitation copié dans le presse-papiers.', sh_copyFailed: 'Impossible de copier le lien d’invitation.', sh_signedOut: 'Déconnecté — vous jouez en local.',
   graphics: 'Graphismes', quality: 'Qualité', auto: 'Auto (détectée : {tier})',
   tier_low: 'Basse', tier_balanced: 'Équilibrée', tier_high: 'Haute', tier_ultra: 'Ultra',
   scale: 'Échelle de rendu', fromPreset: 'Selon la qualité ({tier})',
@@ -54,10 +57,11 @@ const FR = {
 
 export const GFX_STRINGS = {
   'en-US': EN,
-  'en-GB': { ...EN, cat_grade: 'Colour grade' },
+  'en-GB': { ...EN, sh_copyFailed: 'Couldn’t copy the invite link.', cat_grade: 'Colour grade' },
   'es-419': ES,
-  'es-ES': { ...ES, fps: 'Mostrar imágenes por segundo' },
+  'es-ES': { ...ES, sh_copyFailed: 'No se ha podido copiar el enlace de invitación.', sh_signedOut: 'Sesión cerrada: juegas en local.', fps: 'Mostrar imágenes por segundo' },
   'de-DE': {
+    sh_signIn: 'Mit StarHermit anmelden', sh_signInHint: 'Fortschritt und Einstellungen synchronisieren.', sh_invite: 'Freund einladen', sh_inviteHint: 'Einladungslink kopieren.', sh_copied: 'Einladungslink in die Zwischenablage kopiert.', sh_copyFailed: 'Einladungslink konnte nicht kopiert werden.', sh_signedOut: 'Abgemeldet – du spielst lokal weiter.',
     graphics: 'Grafik', quality: 'Qualität', auto: 'Automatisch (erkannt: {tier})',
     tier_low: 'Niedrig', tier_balanced: 'Ausgewogen', tier_high: 'Hoch', tier_ultra: 'Ultra',
     scale: 'Renderskalierung', fromPreset: 'Laut Stufe ({tier})',
@@ -74,8 +78,9 @@ export const GFX_STRINGS = {
     sum_bloom: 'Leuchten', sum_reflections: 'Spiegelungen', sum_noAA: 'keine Kantenglättung', sum_particles: 'Partikel',
   },
   'fr-FR': FR,
-  'fr-CA': { ...FR, cat_bloom: 'Effet de lueur', sum_bloom: 'lueur' },
+  'fr-CA': { ...FR, sh_signInHint: 'Synchronisez votre progression et vos paramètres.', cat_bloom: 'Effet de lueur', sum_bloom: 'lueur' },
   'pt-BR': {
+    sh_signIn: 'Entrar com StarHermit', sh_signInHint: 'Sincronize seu progresso e suas configurações.', sh_invite: 'Convidar um amigo', sh_inviteHint: 'Copie seu link de convite.', sh_copied: 'Link de convite copiado para a área de transferência.', sh_copyFailed: 'Não foi possível copiar o link de convite.', sh_signedOut: 'Sessão encerrada — jogando localmente.',
     graphics: 'Gráficos', quality: 'Qualidade', auto: 'Automática (detectada: {tier})',
     tier_low: 'Baixa', tier_balanced: 'Equilibrada', tier_high: 'Alta', tier_ultra: 'Ultra',
     scale: 'Escala de renderização', fromPreset: 'Conforme a qualidade ({tier})',
@@ -92,6 +97,7 @@ export const GFX_STRINGS = {
     sum_bloom: 'brilho', sum_reflections: 'reflexos', sum_noAA: 'sem antisserrilhado', sum_particles: 'partículas',
   },
   'it-IT': {
+    sh_signIn: 'Accedi con StarHermit', sh_signInHint: 'Sincronizza progressi e impostazioni.', sh_invite: 'Invita un amico', sh_inviteHint: 'Copia il tuo link di invito.', sh_copied: 'Link di invito copiato negli appunti.', sh_copyFailed: 'Impossibile copiare il link di invito.', sh_signedOut: 'Disconnesso: giochi in locale.',
     graphics: 'Grafica', quality: 'Qualità', auto: 'Automatica (rilevata: {tier})',
     tier_low: 'Bassa', tier_balanced: 'Bilanciata', tier_high: 'Alta', tier_ultra: 'Ultra',
     scale: 'Scala di rendering', fromPreset: 'Dalla qualità ({tier})',

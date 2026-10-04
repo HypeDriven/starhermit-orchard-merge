@@ -3,7 +3,7 @@
 <head>
   <link rel="icon" href="favicon.png" type="image/png">
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Orchard Merge</title>
 <style>
   :root{
@@ -64,6 +64,8 @@
     #warn-banner{top:auto;bottom:calc(var(--tap) + 24px)}
   }
   @media (min-width:1024px){#thumbtray{display:none}}
+  #sh-toast{position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:60;max-width:min(90vw,420px);padding:10px 16px;border-radius:12px;background:#2b2118;color:#fff6e6;border:1px solid #e0a95a;text-align:center}
+  #profile-line .avatar{width:20px;height:20px;border-radius:50%;vertical-align:middle;margin-right:6px;object-fit:cover}
   #aria-live{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
   #board-list{max-height:160px;overflow:auto;font-size:.85em;margin:6px 0 0;padding-left:18px}
   #warn-banner{position:absolute;top:8px;left:50%;transform:translateX(-50%);
@@ -180,6 +182,10 @@
           <button id="bt-settings">Settings</button>
           <button id="bt-help">Help</button>
         </div>
+        <div class="row" style="justify-content:center">
+          <button id="bt-sh-signin" class="hidden"><span>Sign in with StarHermit</span></button>
+          <button id="bt-sh-invite" class="hidden"><span>Invite a friend</span></button>
+        </div>
       </div>
     </section>
 
@@ -213,7 +219,6 @@
         <h2 id="res-h">Results</h2>
         <div id="res-breakdown"></div>
         <div id="res-achievements" class="muted"></div>
-        <p id="res-submit" class="small muted"></p>
         <div class="row">
           <button id="br-retry" class="primary">Retry</button>
           <button id="br-next" class="hidden">Next</button>
@@ -263,7 +268,7 @@
         <div class="col">
           <div class="panel"><h3>Drop</h3><p>Aim along the top of the crate, release to drop the current fruit. Matching tiers merge into the next tier and score points (tier² × 5).</p></div>
           <div class="panel"><h3>Warning line</h3><p>If settled fruit stays above the glowing line for the grace period, the run overflows and ends.</p></div>
-          <div class="panel"><h3>Controls</h3><p>Drag / aim slider, <span class="kbd">←</span><span class="kbd">→</span> aim, <span class="kbd">Space</span> drop, <span class="kbd">U</span> undo (practice), <span class="kbd">H</span> hint, <span class="kbd">P</span>/<span class="kbd">Esc</span> pause, <span class="kbd">R</span> restart.</p></div>
+          <div class="panel"><h3>Controls</h3><p>Drag / aim slider, <span class="kbd" data-key-action="aimLeft">←</span><span class="kbd" data-key-action="aimRight">→</span> aim, <span class="kbd" data-key-action="drop">Space</span> drop, <span class="kbd" data-key-action="undo">U</span> undo (practice), <span class="kbd" data-key-action="hint">H</span> hint, <span class="kbd" data-key-action="pause">P</span> pause, <span class="kbd" data-key-action="restart">R</span> restart.</p></div>
           <div class="panel"><h3>Modes</h3><p><strong>Learn</strong>: guided tutorial. <strong>Journey</strong>: 40 staged goals. <strong>Daily</strong>: one ranked run per UTC day. <strong>Practice</strong>: relaxed, with undo. <strong>Challenge</strong>: preset rule variants.</p></div>
         </div>
         <button id="help-close" class="primary">Close</button>
@@ -272,10 +277,12 @@
 
     <div id="fps-meter" hidden aria-hidden="true"></div>
     <div id="aria-live" aria-live="polite"></div>
+    <div id="sh-toast" class="hidden" role="status"></div>
   </div>
 </div>
 <script src="./src/rules.js"></script>
 <script type="importmap">{"imports":{"three":"./dist/three.module.min.js","three/addons/":"./dist/addons/"}}</script>
+<script src="./starhermit-sdk.js"></script>
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>

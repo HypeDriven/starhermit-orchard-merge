@@ -2,7 +2,7 @@
 // 1. Config & palettes  2. Persistence  3. Audio  4. Three.js scene
 // 5. Game session (modes, journey, replay)  6. Input  7. Screens/UI  8. Main loop
 import * as THREE from 'three';
-import { zipStore, unzipFirstEntry, bytesToBase64 } from './zip.js';
+import { platform } from './platform.js';
 import { PRESETS, CATEGORIES, SHADOW_MAP, PARTICLE_COUNT, detectPreset, resolve, presetTier, describe, choosePreset } from './gfx.js';
 import { pickLocale, translator } from './gfx-i18n.js';
 import { makeTextures, disposeTextures, makeEnvironment, buildOrchard, Motes, Bursts, PostChain } from './render-gfx.js';
@@ -92,236 +92,68 @@ function persist() {
     localStorage.setItem(SAVE_KEY, JSON.stringify(d));
   } catch { /* storage full/blocked — play on without persistence */ }
   platform.scheduleCloudPush();
+  pushPlatformSettings();
 }
 
-// ---------------- 2b. StarHermit platform adapter ----------------
-// Token-aware same-origin API client with graceful offline fallback. Hosted
-// mode activates iff a launch token was read from the URL fragment.
+// ---------------- 2b. StarHermit platform (src/platform.js over the SDK) ----------------
 const SYNC_LABELS = {
   saving: 'cloud save: saving…',
   synced: 'cloud save: synced',
   error: 'cloud save unreachable — progress is safe on this device',
   offline: 'connecting…',
 };
-
-// Launch token: `#game_token=<jwt>` (optional `&session_id=`), read once and
-// stripped. Query-param fallbacks exist for local dev only.
-function readLaunchToken() {
-  let token = null;
-  if (window.location.hash.length > 1) {
-    const params = new URLSearchParams(window.location.hash.slice(1));
-    token = params.get('game_token');
-    if (token) {
-      params.delete('game_token');
-      const rest = params.toString();
-      history.replaceState(null, '', window.location.pathname + window.location.search + (rest ? '#' + rest : ''));
-    }
-  }
-  if (!token) {
-    const q = new URLSearchParams(window.location.search);
-    token = q.get('game_token') || q.get('token') || q.get('launch') || q.get('launch_token');
-  }
-  return token;
-}
-
-// JWT payload decode (no verify): sub = user id, game_scope = this game's slug.
-function decodeLaunchToken(token) {
-  try {
-    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    const json = JSON.parse(atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4)));
-    return { sub: json.sub, slug: json.game_scope };
-  } catch { return {}; }
-}
-
-const launchToken = readLaunchToken();
-const claims = launchToken ? decodeLaunchToken(launchToken) : {};
-
-const platform = {
-  timeOffsetMs: 0,            // server - client, ms
-  online: false,
-  token: launchToken,
-  sub: claims.sub || null,
-  slug: claims.slug || null,
-  hosted: !!(launchToken && claims.sub && claims.slug),
-  nickname: null,
-  syncState: 'offline',       // offline | saving | synced | error
-  _pushTimer: null, _pushing: false, _adopting: false,
-  _lastSig: null, _refreshTimer: null,
-  _profileCache: new Map(),
-
-  authHeaders() {
-    return this.token ? { Authorization: 'Bearer ' + this.token } : {};
-  },
-  setSync(state) {
-    this.syncState = state;
-    updateProfileLine();
-  },
-  now() { return Date.now() + this.timeOffsetMs; },
-
-  // Round-trip-adjusted server clock for dailies and timestamps.
-  async fetchTime() {
-    try {
-      const t0 = Date.now();
-      const res = await fetch('/api/v1/time', { headers: this.authHeaders() });
-      const t1 = Date.now();
-      if (!res.ok) return;
-      const j = await res.json();
-      const serverMs = typeof j === 'number' ? j : (j.now ?? j.time ?? j.ms);
-      if (typeof serverMs === 'number') this.timeOffsetMs = serverMs - (t0 + t1) / 2;
-      this.online = true;
-    } catch { this.online = false; }
-  },
-  async get(path) {
-    const res = await fetch(path, { headers: this.authHeaders() });
-    if (res.status === 429) throw new Error('rate-limited');
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || 'request-failed');
-    return data;
-  },
-  async post(path, body) {
-    const res = await fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
-      body: JSON.stringify(body),
-    });
-    if (res.status === 429) throw new Error('rate-limited');
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || 'request-failed');
-    return data;
-  },
-
-  // Nickname from the user profile; NEVER /api/v1/me, never usernames.
-  async fetchNickname(userId) {
-    if (this._profileCache.has(userId)) return this._profileCache.get(userId);
-    let name = 'Player ' + String(userId).slice(0, 8);
-    try {
-      const data = await this.get('/api/v1/users/' + userId + '/profile');
-      if (data && typeof data.nickname === 'string' && data.nickname) name = data.nickname;
-    } catch { /* keep fallback */ }
-    this._profileCache.set(userId, name);
-    return name;
-  },
-  async fetchProfile() {
-    this.nickname = await this.fetchNickname(this.sub);
-    updateProfileLine();
-  },
-
-  // Token lifetime is 60 min; re-mint scoped tokens every 45 min, retry ~60 s.
-  async refreshToken() {
-    clearTimeout(this._refreshTimer);
-    if (!this.hosted) return;
-    try {
-      const data = await this.post('/api/v1/games/' + this.slug + '/launch-token', {});
-      if (data && typeof data.token === 'string' && data.token) this.token = data.token;
-      this._refreshTimer = setTimeout(() => this.refreshToken(), 45 * 60 * 1000);
-    } catch {
-      this._refreshTimer = setTimeout(() => this.refreshToken(), 60 * 1000);
-    }
-  },
-
-  // ---- cloud save: ONE slot, zip+base64. localStorage stays the offline
-  // cache; the cloud slot is a mirror and wins on load conflict. ----
-  buildSaveDoc() {
-    const { sum, ...rest } = save;
-    return { version: SAVE_VERSION, savedAt: new Date().toISOString(), save: rest };
-  },
-  saveSignature(doc) { return JSON.stringify(doc.save); },
-  scheduleCloudPush() {
-    if (!this.hosted || this._adopting) return;
-    clearTimeout(this._pushTimer);
-    this.setSync('saving');
-    this._pushTimer = setTimeout(() => this.flushCloud(), 2000);
-  },
-  async flushCloud() {
-    if (!this.hosted || this._pushing) return;
-    clearTimeout(this._pushTimer);
-    const doc = this.buildSaveDoc();
-    const sig = this.saveSignature(doc);
-    if (sig === this._lastSig && this.syncState === 'synced') return;
-    this._pushing = true;
-    try {
-      const bytes = zipStore('save.json', new TextEncoder().encode(JSON.stringify(doc)));
-      const res = await fetch('/api/v1/me/cloud-saves/' + this.slug, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
-        body: JSON.stringify({ dataBase64: bytesToBase64(bytes) }),
-        keepalive: true,
-      });
-      if (!res.ok) throw new Error('cloud-save-failed');
-      this._lastSig = sig;
-      this.setSync('synced');
-    } catch {
-      this.setSync('error');
-    } finally {
-      this._pushing = false;
-    }
-  },
-  async loadCloud() {
-    if (!this.hosted) return;
-    try {
-      const res = await fetch('/api/v1/me/cloud-saves/' + this.slug, { headers: this.authHeaders() });
-      if (res.status === 404) {   // no remote save yet: push the local doc
-        this._lastSig = null;
-        await this.flushCloud();
-        return;
-      }
-      if (!res.ok) throw new Error('cloud-load-failed');
-      const doc = JSON.parse(new TextDecoder().decode(unzipFirstEntry(new Uint8Array(await res.arrayBuffer()))));
-      if (!doc || typeof doc !== 'object' || !doc.save || typeof doc.save !== 'object' || !doc.save.settings) {
-        throw new Error('bad-cloud-doc');
-      }
-      this.adoptRemote(doc);
-      this.setSync('synced');
-    } catch {
-      this.setSync('error');
-    }
-  },
-  adoptRemote(doc) {
-    this._adopting = true;
-    try {
-      for (const k of Object.keys(save)) delete save[k];
-      Object.assign(save, JSON.parse(JSON.stringify(doc.save)));
-      save.achievements = save.achievements || {};
-      save.lifetime = save.lifetime || 0;
-      save.version = SAVE_VERSION;
-      migrateSettings(save.settings);
-      persist();               // rewrites the local cache; push skipped while adopting
-      this._lastSig = this.saveSignature(this.buildSaveDoc());
-      applySettingsOnlyLooks();
-      audio.applyVolumes();
-      applyGraphics();   // rebuilds the scene only if palette/scene-level tiers changed
-      gotoTitle();
-    } finally {
-      this._adopting = false;
-    }
-  },
-
-  // Read-only platform leaderboard; null when none exists or unreachable.
-  // Clients can never submit to it (script/elo-owned per the wiki).
-  async fetchLeaderboard(pageSize = 50) {
-    if (!this.hosted) return null;
-    try {
-      const game = await this.get('/api/v1/games/' + this.slug);
-      if (!game || !game.leaderboardId) return null;
-      const data = await this.get('/api/v1/leaderboards/' + game.leaderboardId +
-        '/entries?friendsOnly=&page=1&pageSize=' + pageSize);
-      const entries = data.entries || data.items || [];
-      const rows = [];
-      for (let i = 0; i < entries.length; i++) {
-        const e = entries[i];
-        const id = e.userId || e.user_id || null;
-        rows.push({
-          rank: e.rank != null ? e.rank : i + 1,
-          name: id ? await this.fetchNickname(id) : (e.name || 'Player'),
-          score: e.score,
-        });
-      }
-      return rows;
-    } catch { return null; }
-  },
+const hostedAtLaunch = platform.init();   // reads #game_token / #access_token once
+platform.hooks.buildSaveDoc = () => {
+  const { sum, ...rest } = save;
+  return { version: SAVE_VERSION, savedAt: new Date().toISOString(), save: rest };
 };
+platform.hooks.adoptRemote = (doc) => {
+  for (const k of Object.keys(save)) delete save[k];
+  Object.assign(save, JSON.parse(JSON.stringify(doc.save)));
+  save.achievements = save.achievements || {};
+  save.lifetime = save.lifetime || 0;
+  save.version = SAVE_VERSION;
+  migrateSettings(save.settings);
+  persist();               // rewrites the local cache; push skipped while adopting
+  applySettingsOnlyLooks();
+  audio.applyVolumes();
+  applyGraphics();   // rebuilds the scene only if palette/scene-level tiers changed
+  gotoTitle();
+};
+platform.hooks.onStatus = () => updateProfileLine();
 
-// Host time offset comes from the platform clock (see §6 of the spec).
+// Player preferences mirrored to the StarHermit settings KV (the account value
+// wins at boot). Progress flags such as tutorialDone stay in the save doc.
+const KV_KEYS = ['music', 'sfx', 'amb', 'mute', 'haptics', 'gfx', 'palette', 'reducedMotion', 'highContrast', 'largerText'];
+let kvSig = null;
+function kvSnapshot() {
+  const o = {};
+  for (const k of KV_KEYS) o[k] = save.settings[k] ?? null;
+  return o;
+}
+function pushPlatformSettings() {
+  if (!platform.hosted) return;
+  const o = kvSnapshot();
+  const sig = JSON.stringify(o);
+  if (sig === kvSig) return;
+  kvSig = sig;
+  platform.patchSettings(o);
+}
+async function loadPlatformSettings() {
+  const kv = await platform.getSettings();
+  if (!kv) return;
+  let changed = false;
+  for (const k of KV_KEYS) if (kv[k] !== undefined && kv[k] !== null) { save.settings[k] = kv[k]; changed = true; }
+  kvSig = JSON.stringify(kvSnapshot());
+  if (!changed) return;
+  migrateSettings(save.settings);
+  persist();
+  applySettingsOnlyLooks();
+  audio.applyVolumes();
+  applyGraphics();
+}
+
+// Device clock (see §6 of the spec); no own-server time route.
 async function syncServerTime() { await platform.fetchTime(); }
 const now = () => platform.now();
 const utcDateStr = () => new Date(now()).toISOString().slice(0, 10);
@@ -1068,29 +900,9 @@ function onGameOver(reason) {
     save.leaderboard.push(entry);
     save.leaderboard.sort((a, b) => b.score - a.score);
     save.leaderboard = save.leaderboard.slice(0, 50);
-    submitScore(entry);
   }
   persist();
   setTimeout(() => { run.phase = 'results'; showResults(reason, bd); }, 900);
-}
-
-async function submitScore(entry) {
-  // Its-backend replay-validated board (live only when the platform hosts
-  // server.js behind /api); otherwise fall back to the local leaderboard.
-  try {
-    const resp = await platform.post('/api/v1/scores', {
-      name: platform.nickname || 'guest',
-      scope: entry.mode === 'daily' ? 'daily' : 'score-chase',
-      seed: entry.seed, difficulty: entry.difficulty, goals: entry.replay.goals,
-      commands: entry.replay.commands, finalTick: entry.replay.finalTick,
-      finalHash: entry.hash, score: entry.score });
-    if (resp && resp.rank) {
-      $('res-submit').textContent =
-        `Submitted — rank #${resp.rank} on the ${entry.mode === 'daily' ? 'daily' : 'score-chase'} board.`;
-    }
-  } catch {
-    $('res-submit').textContent = 'Leaderboard unavailable — score kept locally.';
-  }
 }
 
 // ---------------- 7. Screens / UI ----------------
@@ -1250,24 +1062,6 @@ async function renderRemoteBoards(body) {
         rows.map(r => [r.rank, r.name, r.score]));
     }
   }
-  // Its-backend replay-validated boards (shared server clock); they exist
-  // only when server.js is hosted behind /api, so failures stay silent.
-  if (platform.online || !platform.hosted) {
-    try {
-      const data = await platform.get('/api/v1/scores?scope=score-chase');
-      const entries = (data.entries || []).slice(0, 20);
-      if (entries.length) {
-        addBoard(body, 'Server board — score chase (validated)', ['#', 'Player', 'Score', 'Date'],
-          entries.map((e, i) => [i + 1, e.name, e.score, (e.at ? new Date(e.at).toISOString().slice(0, 10) : '—')]));
-      }
-      const dd = await platform.get('/api/v1/scores?scope=daily');
-      const daily = (dd.entries || []).slice(0, 20);
-      if (daily.length) {
-        addBoard(body, 'Server board — today’s daily (validated)', ['#', 'Player', 'Score'],
-          daily.map((e, i) => [i + 1, e.name, e.score]));
-      }
-    } catch { /* its-backend not hosted here — local board above is it */ }
-  }
 }
 
 function renderLeaderboard(body) {
@@ -1310,7 +1104,6 @@ function showResults(reason, bd) {
   $('res-achievements').innerHTML =
     `<p class="small muted">Achievements: ${got}/${totalAch} unlocked.</p>` +
     (fresh ? `<ul class="small">${fresh}</ul>` : '');
-  $('res-submit').textContent = '';
   $('br-next').classList.toggle('hidden', !pendingNext);
   announce(`${$('res-h').textContent} Final score ${bd.total}.`);
   showScreen('scr-results');
@@ -1471,12 +1264,23 @@ function gotoTitle() {
 function updateProfileLine() {
   const el = $('profile-line');
   if (!el) return;
+  el.textContent = '';
   if (platform.hosted) {
-    el.textContent = 'Playing as ' + (platform.nickname || '…') + ' — ' +
-      (SYNC_LABELS[platform.syncState] || 'Signed in.');
+    if (platform.avatar) {
+      const img = document.createElement('img');
+      img.className = 'avatar'; img.src = platform.avatar; img.alt = ''; img.width = 20; img.height = 20;
+      el.appendChild(img);
+    }
+    el.appendChild(document.createTextNode('Playing as ' + (platform.nickname || '…') + ' — ' +
+      (SYNC_LABELS[platform.syncState] || 'Signed in.')));
   } else {
     el.textContent = 'Guest — progress is stored on this device.';
   }
+  // StarHermit account buttons: sign-in only where the platform offers it,
+  // invite only when signed in.
+  const si = $('bt-sh-signin'), inv = $('bt-sh-invite');
+  if (si) si.classList.toggle('hidden', !platform.canSignIn());
+  if (inv) inv.classList.toggle('hidden', !platform.inviteLink());
 }
 
 // ---------------- 6. Input ----------------
@@ -1528,20 +1332,41 @@ canvas.addEventListener('lostpointercapture', () => { dragging = false; });
 for (const id of ['aim-slider', 'tt-aim'])
   $(id).addEventListener('input', e => setAim(+e.target.value));
 
+// Keyboard actions by KeyboardEvent.code, mirrored as control.* lines in
+// starhermit.txt; the player's StarHermit rebinds replace these at boot.
+const KEY_DEFAULTS = {
+  pause: ['KeyP', 'Escape'], aimLeft: ['ArrowLeft', 'KeyA'], aimRight: ['ArrowRight', 'KeyD'],
+  drop: ['Space', 'Enter', 'NumpadEnter'], undo: ['KeyU'], hint: ['KeyH'], restart: ['KeyR'],
+};
+let keys = JSON.parse(JSON.stringify(KEY_DEFAULTS));
+function keyAction(code) {
+  for (const [a, codes] of Object.entries(keys)) if (codes.includes(code)) return a;
+  return null;
+}
+function keyLabel(code) {
+  const named = { Escape: 'Esc', ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓', Space: 'Space', Enter: 'Enter', NumpadEnter: 'Num Enter' };
+  return named[code] || String(code || '').replace(/^Key/, '').replace(/^Digit/, '');
+}
+// Help → Controls shows the effective keys.
+function reflectKeys() {
+  for (const el of document.querySelectorAll('[data-key-action]')) {
+    el.textContent = (keys[el.dataset.keyAction] || []).map(keyLabel).join('/');
+  }
+}
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
-  const k = e.key;
-  if (k === 'p' || k === 'P' || k === 'Escape') {
+  const act = keyAction(e.code);
+  if (act === 'pause') {
     if (run.phase === 'active') pauseGame();
     else if (run.phase === 'paused') resumeGame();
     e.preventDefault();
   } else if (run.phase === 'active') {
-    if (k === 'ArrowLeft' || k === 'a' || k === 'A') { setAim(run.aimX - 0.5); e.preventDefault(); }
-    else if (k === 'ArrowRight' || k === 'd' || k === 'D') { setAim(run.aimX + 0.5); e.preventDefault(); }
-    else if (k === ' ' || k === 'Enter') { tryDrop(run.aimX); e.preventDefault(); }
-    else if (k === 'u' || k === 'U') undo();
-    else if (k === 'h' || k === 'H') showHint();
-    else if (k === 'r' || k === 'R') newRun(run.mode, run.modeOpts);
+    if (act === 'aimLeft') { setAim(run.aimX - 0.5); e.preventDefault(); }
+    else if (act === 'aimRight') { setAim(run.aimX + 0.5); e.preventDefault(); }
+    else if (act === 'drop') { tryDrop(run.aimX); e.preventDefault(); }
+    else if (act === 'undo') undo();
+    else if (act === 'hint') showHint();
+    else if (act === 'restart') newRun(run.mode, run.modeOpts);
   }
 });
 
@@ -1567,6 +1392,23 @@ $('bt-challenge').addEventListener('click', () => openSetup('challenge'));
 $('bt-scores').addEventListener('click', () => openSetup('scores'));
 $('bt-settings').addEventListener('click', openSettings);
 $('bt-help').addEventListener('click', () => showScreen('scr-help'));
+$('bt-sh-signin').addEventListener('click', () => platform.signIn());
+$('bt-sh-invite').addEventListener('click', async () => {
+  const link = platform.inviteLink();
+  if (!link) return;
+  try { await navigator.clipboard.writeText(link); toast(gt('sh_copied')); }
+  catch { toast(gt('sh_copyFailed')); }
+});
+// Short visible notice (also announced to screen readers).
+let toastTimer = 0;
+function toast(msg) {
+  const el = $('sh-toast');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  announce(msg);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.add('hidden'), 3200);
+}
 $('bt-resume').addEventListener('click', () => { audio.ensure(); resumeRun(); });
 
 // setup / pause / results / settings / help
@@ -1715,12 +1557,20 @@ function applySettingsOnlyLooks() {
   document.body.classList.toggle('larger-text', save.settings.largerText);
 }
 syncServerTime();
-if (platform.hosted) {
-  platform.fetchProfile();
-  platform.loadCloud();
-  platform.refreshToken();
-  window.addEventListener('pagehide', () => platform.flushCloud());
+platform.hooks.onAuth = (a) => {
+  if (!a.signedIn) toast(gt('sh_signedOut'));
+};
+for (const id of ['bt-sh-signin', 'bt-sh-invite']) {
+  $(id).lang = gfxLocale;
+  $(id).querySelector('span').textContent = gt(id === 'bt-sh-signin' ? 'sh_signIn' : 'sh_invite');
 }
+reflectKeys();
+platform.loadBindings(KEY_DEFAULTS).then(b => { keys = b; reflectKeys(); });
+if (hostedAtLaunch) {
+  platform.fetchProfile();
+  platform.loadCloud().then(loadPlatformSettings);
+}
+window.addEventListener('pagehide', () => platform.flushCloud());
 initRenderer();
 buildGfxPanel();
 applyGraphics();   // resolves the quality model and builds the scene

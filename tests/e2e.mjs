@@ -25,11 +25,9 @@
  * the element's position, and drop legality is gated by our own waits on the
  * Drop button's disabled state.
  *
- * The repo's server.js is the StarHermit authoritative script, so this test
- * embeds its own static server on an ephemeral port, plus minimal stubs for
- * /api/v1/time and /api/v1/scores mirroring server.js (practice runs fully
- * offline; the ranked journey score POST would otherwise 404 and log a
- * benign but noisy console error).
+ * This test embeds its own plain static server on an ephemeral port (no API
+ * routes) and asserts a standalone load makes zero same-origin /api or /ws
+ * requests.
  *
  * Run: npm run test:e2e
  */
@@ -55,18 +53,6 @@ const MIME = {
 function serve() {
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x');
-    // minimal mirrors of server.js API stubs so ranked runs stay console-clean
-    if (url.pathname === '/api/v1/time') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ now: Date.now() }));
-      return;
-    }
-    if (url.pathname === '/api/v1/scores' && req.method === 'POST') {
-      req.resume();
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true }));
-      return;
-    }
     try {
       let p = path.normalize(decodeURIComponent(url.pathname));
       if (p === '/' || p === '\\') p = '/index.html';
@@ -112,6 +98,11 @@ async function runPass(browser, vp, port) {
       : { viewport: { width: 1280, height: 800 } });
   const page = await context.newPage();
   const errors = [];
+  const ownApi = [];
+  page.on('request', (r) => {
+    const u = new URL(r.url());
+    if (u.port === String(port) && /^\/(api|ws)(\/|$)/.test(u.pathname)) ownApi.push(`${r.method()} ${u.pathname}`);
+  });
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
   page.on('console', (m) => {
     if ((m.type() === 'error' || m.type() === 'warning') && !browserNoise.test(m.text())) errors.push(`console ${m.type()}: ${m.text()}`);
@@ -288,6 +279,7 @@ async function runPass(browser, vp, port) {
     await context.close();
   }
 
+  if (ownApi.length) errors.push(`standalone made own-server requests: ${ownApi.join(', ')}`);
   if (errors.length) {
     throw new Error(`[${vp}] page errors:\n${errors.join('\n')}`);
   }
