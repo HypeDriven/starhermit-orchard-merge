@@ -5,6 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Orchard Merge</title>
+<script src="ui-scale.js"></script>
 <style>
   :root{
     --bg:#1d2b1a; --panel:#2c4023; --panel2:#243620; --ink:#f4eedd; --dim:#c9c2a8;
@@ -64,7 +65,14 @@
     #warn-banner{top:auto;bottom:calc(var(--tap) + 24px)}
   }
   @media (min-width:1024px){#thumbtray{display:none}}
-  #sh-toast{position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:60;max-width:min(90vw,420px);padding:10px 16px;border-radius:12px;background:#2b2118;color:#fff6e6;border:1px solid #e0a95a;text-align:center}
+  /* short landscape phones: aim slider and buttons share one row so the tray covers less of the crate */
+  @media (max-width:1023px) and (max-height:500px) and (orientation:landscape){
+    #thumbtray{flex-wrap:nowrap;align-items:center}
+    #thumbtray label.slider{flex:1 1 auto!important;flex-direction:row;align-items:center;gap:8px;min-width:120px}
+    #thumbtray label.slider input{flex:1 1 auto;min-width:0}
+    #thumbtray button{padding:6px 12px}
+  }
+  #sh-toast{position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:60;max-width:min(calc(90vw / var(--ui-scale,1)),420px);padding:10px 16px;border-radius:12px;background:#2b2118;color:#fff6e6;border:1px solid #e0a95a;text-align:center}
   #profile-line .avatar{width:20px;height:20px;border-radius:50%;vertical-align:middle;margin-right:6px;object-fit:cover}
   #aria-live{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
   #board-list{max-height:160px;overflow:auto;font-size:.85em;margin:6px 0 0;padding-left:18px}
@@ -92,6 +100,9 @@
   #fps-meter{position:absolute;left:8px;bottom:8px;z-index:12;pointer-events:none;
     font:600 12px/1.4 ui-monospace,monospace;background:#000a;color:#fff;padding:2px 8px;border-radius:6px}
   #fps-meter[hidden]{display:none}
+  /* Large screens: ui-scale.js sets --ui-scale (1 up to 1600x1000); every DOM
+     UI layer over the stage zooms by it, the full-stage canvas stays unzoomed. */
+  #hud,.screen,#warn-banner,#countdown,#ctxlost,#sh-toast,#fps-meter{zoom:var(--ui-scale,1)}
 </style>
 <script src="browser-guard.js"></script>
 </head>
