@@ -62,6 +62,8 @@ test('hosted: token, profile, cloud save game:<slug>, settings, controls', async
   P.hooks.buildSaveDoc = () => ({ version: 1, save: { settings: { mute: false }, journey: { unlocked: 4 } } });
   P.hooks.adoptRemote = (doc) => { adopted = doc; };
   await P.flushCloud();
+  assert.deepEqual(Object.keys(srv.saves), []);   // nothing is pushed before the start-up load
+  await P.loadCloud();                             // empty slot: seeded from the local doc
   assert.deepEqual(Object.keys(srv.saves), ['game:om-slug']);
   await P.loadCloud();
   assert.deepEqual(adopted.save.journey, { unlocked: 4 });

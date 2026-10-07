@@ -15,6 +15,7 @@ export const platform = {
   // set by main.js: buildSaveDoc() -> doc, adoptRemote(doc), onStatus(), onAuth({signedIn})
   hooks: {},
   _pushTimer: null, _pushing: false, _adopting: false, _lastSig: null, _inited: false,
+  _cloudReady: false,          // true once the start-up loadCloud() has resolved
 
   get hosted() { const s = sdk(); return !!(s && s.signedIn && s.slug); },
   get sub() { return this.hosted ? sdk().userId : null; },
@@ -60,14 +61,18 @@ export const platform = {
   // ---- cloud save: the `game:<slug>` slot. localStorage stays the offline
   // cache; the cloud slot is a mirror and wins on load conflict. ----
   saveSignature(doc) { return JSON.stringify(doc.save); },
+  // No push before the start-up load resolves: the doc is built from live local
+  // state, so a debounced push or a hide/pagehide flush during the load would
+  // PUT the stale local copy over a newer cloud save (which is then adopted
+  // locally without being re-pushed). loadCloud() seeds an empty slot itself.
   scheduleCloudPush() {
-    if (!this.hosted || this._adopting) return;
+    if (!this.hosted || this._adopting || !this._cloudReady) return;
     clearTimeout(this._pushTimer);
     this.setSync('saving');
     this._pushTimer = setTimeout(() => this.flushCloud(), 2000);
   },
   async flushCloud() {
-    if (!this.hosted || this._pushing || !this.hooks.buildSaveDoc) return;
+    if (!this.hosted || !this._cloudReady || this._pushing || !this.hooks.buildSaveDoc) return;
     clearTimeout(this._pushTimer);
     const doc = this.hooks.buildSaveDoc();
     const sig = this.saveSignature(doc);
@@ -86,7 +91,8 @@ export const platform = {
   async loadCloud() {
     if (!this.hosted) return;
     try {
-      const doc = await sdk().loadJSON();
+      let doc;
+      try { doc = await sdk().loadJSON(); } finally { this._cloudReady = true; }
       if (!doc) {               // no remote save yet: push the local doc
         this._lastSig = null;
         await this.flushCloud();
