@@ -97,5 +97,6 @@ test('standalone: no token means no platform fetch at all', async () => {
   assert.equal(P.canSignIn(), false);
   await P.fetchTime();
   assert.equal(await P.fetchLeaderboard(), null);
+  assert.deepEqual(await P.submitScore(500), { posted: false, rank: null });
   assert.equal(srv.calls.length, 0);
 });

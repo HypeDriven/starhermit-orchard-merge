@@ -2,7 +2,7 @@
 // (starhermit-sdk.js, loaded by index.html as window.StarHermit).
 // Hosted mode = the SDK read a launch token (#game_token / #access_token);
 // the SDK owns the token and its renewal, the `game:<slug>` cloud-save slot,
-// the per-player settings KV, controls and read-only leaderboards. Without a
+// the per-player settings KV, controls and the high-score leaderboard. Without a
 // token no request of any kind is made (no own-server /api or /ws routes).
 
 const sdk = () => (typeof window !== 'undefined' && window.StarHermit) || globalThis.StarHermit || null;
@@ -123,12 +123,27 @@ export const platform = {
   signIn() { const s = sdk(); return !!(s && s.signIn()); },
   inviteLink() { return this.hosted ? sdk().inviteLink() : null; },
 
-  // Read-only platform leaderboard (first board); null when none exists or
-  // unreachable. Clients can never submit to it.
+  // Post a finished ranked run to the high-score board (score-script.js);
+  // resolves { posted, rank } — rank may be null.
+  async submitScore(total) {
+    if (!this.hosted) return { posted: false, rank: null };
+    const s = sdk();
+    try {
+      const keys = await s.submitScores({ 'high-score': total });
+      if (!keys || keys.indexOf('high-score') < 0) return { posted: false, rank: null };
+      try {
+        const r = await s.leaderboard('high-score', { pageSize: 100 });
+        const me = (r.items || []).find((i) => i.userId === s.userId);
+        return { posted: true, rank: me ? me.rank : null };
+      } catch { return { posted: true, rank: null }; }
+    } catch { return { posted: false, rank: null }; }
+  },
+
+  // The high-score board's top entries; null when none exists or unreachable.
   async fetchLeaderboard(pageSize = 50) {
     if (!this.hosted) return null;
     try {
-      const res = await sdk().leaderboard(null, { pageSize });
+      const res = await sdk().leaderboard('high-score', { pageSize });
       if (!res || !res.board) return null;
       const rows = [];
       const items = res.items || [];

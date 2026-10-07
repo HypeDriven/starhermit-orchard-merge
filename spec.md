@@ -191,7 +191,7 @@ No module may mutate rules state except through a validated command. Rendering c
 ## 6. StarHermit integration
 
 ### Packaging and launch
-- The distribution ships `starhermit.txt` at its root (`name`, `description`, `launch=index.html`, `owner`, `server=server.js`, `cover`, and one `control.<action>=<codes> | <label>` line per keyboard action) and `starhermit-sdk.js`, loaded by `index.html` before `src/main.js`.
+- The distribution ships `starhermit.txt` at its root (`name`, `description`, `launch=index.html`, `owner`, `server=score-script.js`, `cover`, and one `control.<action>=<codes> | <label>` line per keyboard action) and `starhermit-sdk.js`, loaded by `index.html` before `src/main.js`.
 - All platform traffic goes through the SDK; `src/platform.js` adapts it. `StarHermit.init()` reads `#game_token=` (library launch) or `#access_token=` (direct sign-in return) once and strips it; the slug is the `game_scope` claim. Without a token no platform request is made and guest play is unchanged.
 - The SDK renews the launch token before expiry. If renewal is refused the title line returns to guest, a "signed out — playing locally" toast shows, sign-in is re-offered and play continues on localStorage.
 
@@ -205,12 +205,12 @@ No module may mutate rules state except through a validated command. Rendering c
 - Sign-in/invite labels and toasts are localized in all nine locales (`src/gfx-i18n.js` `sh_*`).
 
 ### Leaderboards and achievements
-- **Platform leaderboard (read-only):** Score chase shows the game's first platform board with nickname-resolved rows when hosted. Clients never submit platform scores.
-- **Local board:** ranked runs are kept on the local board (top 50 with replay data). The client never calls `server.js` routes (`/api/v1/scores`, `/api/v1/time`); the device clock sets the daily boundary. Without a launch token the game makes no network request beyond its static files.
+- **Platform leaderboard:** signed in, every finished ranked run (Journey, the day's first Daily, Challenge) posts its total through `StarHermit.submitScores` — a practice session whose `score-script.js` (the `server=` platform script; canonical copy in the games repo's `tools/score-script.js`) range-checks it and posts it to the `high-score` board (integer, higher is better, 0–1,000,000). The results screen shows "Leaderboard rank: #N" (or posted / not posted), localized in the nine locales (`src/gfx-i18n.js` `sh_lb*`). Score chase shows the `high-score` board's entries with nickname-resolved rows. Learn, Practice and Daily replays post nothing; standalone play posts nothing and shows no leaderboard line.
+- **Local board:** ranked runs are also kept on the local board (top 50 with replay data). `server.js` is the local dev server; the client never calls its routes (`/api/v1/scores`, `/api/v1/time`); the device clock sets the daily boundary. Without a launch token the game makes no network request beyond its static files.
 - Achievements are local (part of the save document); no server declares platform achievements.
 
 ### Not used
-- Sessions, matchmaking, friends picker, session chat, replays, realtime rooms and voice: the game is single-player and `server.js` is a dev static/API server, not a platform session script.
+- Sessions, matchmaking, friends picker, session chat, replays, realtime rooms and voice: the game is single-player; `score-script.js` only accepts score posts and `server.js` is a dev static/API server.
 
 ## 7. Content, economy, and retention
 

@@ -1054,11 +1054,11 @@ function addBoard(body, title, headers, rows) {
 }
 
 async function renderRemoteBoards(body) {
-  // Hosted: the platform leaderboard is read-only per the wiki.
+  // Hosted: the high-score board (ranked runs post to it from the results screen).
   if (platform.hosted) {
     const rows = await platform.fetchLeaderboard();
     if (rows && rows.length) {
-      addBoard(body, 'Global board (read-only)', ['#', 'Player', 'Score'],
+      addBoard(body, 'Global board', ['#', 'Player', 'Score'],
         rows.map(r => [r.rank, r.name, r.score]));
     }
   }
@@ -1083,6 +1083,20 @@ function renderLeaderboard(body) {
   renderRemoteBoards(body);
 }
 
+// Signed in, ranked runs only: post the total and show the board rank.
+function postToLeaderboard(total) {
+  const line = $('res-lb');
+  if (!run.ranked || !platform.hosted) { line.classList.add('hidden'); return; }
+  const mine = run.state;
+  line.classList.remove('hidden');
+  line.textContent = gt('sh_lbPosting');
+  platform.submitScore(total).then((r) => {
+    if (run.state !== mine) return;
+    line.textContent = !r.posted ? gt('sh_lbNotPosted')
+      : r.rank ? gt('sh_lbRank').replace('{rank}', r.rank) : gt('sh_lbPosted');
+  });
+}
+
 function showResults(reason, bd) {
   const heads = { overflow: 'Crate overflowed!', 'goal-complete': 'Goal complete! 🎉',
     'move-limit': 'Out of moves!', resigned: 'Run resigned' };
@@ -1105,6 +1119,7 @@ function showResults(reason, bd) {
     `<p class="small muted">Achievements: ${got}/${totalAch} unlocked.</p>` +
     (fresh ? `<ul class="small">${fresh}</ul>` : '');
   $('br-next').classList.toggle('hidden', !pendingNext);
+  postToLeaderboard(bd.total);
   announce(`${$('res-h').textContent} Final score ${bd.total}.`);
   showScreen('scr-results');
   $('hud').classList.add('hidden');
