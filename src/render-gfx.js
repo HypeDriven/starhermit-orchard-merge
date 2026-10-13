@@ -445,7 +445,7 @@ export class PostChain {
   render(dt) {
     if (!this.composer) return false;
     try {
-      this.composer.render(dt);
+      (globalThis.GameOptions ? globalThis.GameOptions.draw(this.composer.renderer, () => this.composer.render(dt)) : this.composer.render(dt));
       return true;
     } catch {
       this.failed = true;

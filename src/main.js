@@ -182,7 +182,7 @@ const audio = (() => {
     if (!ctx) return false;
     const buf = sampleBufs.get(name);
     if (!buf) { loadSample(name); return false; }
-    const src = ctx.createBufferSource();
+    const src = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createBufferSource(), name) : ctx.createBufferSource());
     src.buffer = buf;
     src.connect(sfxG);
     src.start();
@@ -213,7 +213,7 @@ const audio = (() => {
   function blip(dest, freq, dur, type = 'sine', peak = 0.3, t = null) {
     if (!ctx) return;
     t = t ?? ctx.currentTime;
-    const o = ctx.createOscillator(), g = ctx.createGain();
+    const o = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createOscillator(), null) : ctx.createOscillator()), g = ctx.createGain();
     o.type = type; o.frequency.value = freq;
     o.connect(g); g.connect(dest); env(g, t, 0.005, dur, peak);
     o.start(t); o.stop(t + dur + 0.1);
@@ -221,7 +221,7 @@ const audio = (() => {
   function thud(tier) {
     if (!ctx) return;
     const t = ctx.currentTime;
-    const o = ctx.createOscillator(), g = ctx.createGain();
+    const o = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createOscillator(), null) : ctx.createOscillator()), g = ctx.createGain();
     o.type = 'sine'; o.frequency.setValueAtTime(180 + tier * 18, t);
     o.frequency.exponentialRampToValueAtTime(60, t + 0.12);
     o.connect(g); g.connect(sfxG); env(g, t, 0.004, 0.16, 0.4);
@@ -233,10 +233,10 @@ const audio = (() => {
     const buf = ctx.createBuffer(1, len, ctx.sampleRate);
     const ch = buf.getChannelData(0);
     for (let i = 0; i < len; i++) ch[i] = Math.random() * 2 - 1;
-    const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
+    const src = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createBufferSource(), null) : ctx.createBufferSource()); src.buffer = buf; src.loop = true;
     const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 320; lp.Q.value = 0.4;
     const g = ctx.createGain(); g.gain.value = 0.12;
-    const lfo = ctx.createOscillator(); lfo.frequency.value = 0.08;
+    const lfo = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createOscillator(), null) : ctx.createOscillator()); lfo.frequency.value = 0.08;
     const lfoG = ctx.createGain(); lfoG.gain.value = 0.06;
     lfo.connect(lfoG); lfoG.connect(g.gain);
     src.connect(lp); lp.connect(g); g.connect(ambG);
@@ -678,7 +678,7 @@ function renderFrame(dtMs) {
   if (w !== gfx.size[0] || h !== gfx.size[1] || pr !== gfx.pixelRatio) resize();
   const failedBefore = post.failed;
   post.sync(q, scene, camera, w, h, gfx.pixelRatio);
-  if (!post.render(dtMs / 1000)) renderer.render(scene, camera);
+  if (!post.render(dtMs / 1000)) (globalThis.GameOptions ? globalThis.GameOptions.draw(renderer, () => renderer.render(scene, camera)) : renderer.render(scene, camera));
   if (post.failed !== failedBefore) updateGfxPanel();
 }
 
