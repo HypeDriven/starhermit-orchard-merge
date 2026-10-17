@@ -3,7 +3,7 @@
 // 5. Game session (modes, journey, replay)  6. Input  7. Screens/UI  8. Main loop
 import * as THREE from 'three';
 import { platform } from './platform.js';
-import { PRESETS, CATEGORIES, SHADOW_MAP, PARTICLE_COUNT, detectPreset, resolve, presetTier, describe, choosePreset } from './gfx.js';
+import { PRESETS, CATEGORIES, SHADOW_MAP, detectLevel, presetForLevel, sparkCap, resolve, presetTier, describe, choosePreset } from './gfx.js';
 import { translator } from './gfx-i18n.js';
 import { T, N, initLanguage, getLang, onLanguage } from './i18n.js';
 import { mergeSaves } from './save-merge.js';
@@ -305,7 +305,7 @@ const motionOK = () => !save.settings.reducedMotion && !reducedMotionQuery.match
 
 // Graphics state: resolved quality (gfx.js), GPU, adaptive resolution and frame timing.
 const gfx = {
-  gpu: '', detected: 'balanced', q: null, sceneKey: null,
+  gpu: '', level: null, detected: 'balanced', q: null, sceneKey: null,
   adaptiveScale: 1, frames: [], fps: 0, pixelRatio: 1, size: [0, 0],
 };
 
@@ -341,7 +341,14 @@ function initRenderer() {
   } catch { gfx.gpu = ''; }
   const touchFirst = (matchMedia('(pointer: coarse)').matches && !matchMedia('(any-pointer: fine)').matches) ||
     /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
-  gfx.detected = detectPreset(gfx.gpu, { mobile: touchFirst });
+  // StarHermit hardware level (src/gpu-level.js): renderer string + device facts (phone/tablet, cores, memory).
+  let sys = { mobile: touchFirst, webgl2: renderer.capabilities.isWebGL2 };
+  try {
+    const G = globalThis.StarHermitGpu;
+    if (G) { const d = G.detectSystem(); sys = { ...sys, mobile: sys.mobile || d.mobile, touch: d.touch, screen: d.screen, cores: d.cores, memoryGb: d.memoryGb, astc: d.astc }; }
+  } catch { /* defaults */ }
+  gfx.level = detectLevel(gfx.gpu, sys);
+  gfx.detected = presetForLevel(gfx.level);
 }
 
 function disposeScene() {
@@ -364,7 +371,7 @@ function buildScene() {
   const detailed = q.detail === 'detailed';
   disposeScene();
   freshSync = true;
-  textures = makeTextures();
+  textures = makeTextures(q.budget.texture);
   scene = new THREE.Scene();
   if (detailed) {
     scene.background = textures.sky;
@@ -393,7 +400,12 @@ function buildScene() {
   fitShadowFrustum();
 
   const T = textures;
-  const std = (o) => new THREE.MeshStandardMaterial(o);
+  // Stall shading per the preset's budget: Lambert on Low (roughness/env settings dropped), Standard above.
+  const std = (o) => {
+    if (q.budget.material !== 'lambert') return new THREE.MeshStandardMaterial(o);
+    const { roughness, metalness, envMapIntensity, ...rest } = o;
+    return new THREE.MeshLambertMaterial(rest);
+  };
   const woodMat = detailed ? std({ color: 0xffffff, map: T.wood, roughness: 0.75 }) : std({ color: 0x8a5a33, roughness: 0.8 });
   const darkWood = detailed ? std({ color: 0x9a8070, map: T.wood, roughness: 0.8 }) : std({ color: 0x6e4526, roughness: 0.85 });
   const box = (w, h, d, mat, x, y, z, { cast = true, receive = true } = {}) => {
@@ -472,10 +484,10 @@ function buildScene() {
     new THREE.MeshBasicMaterial({ color: 0xffe08a }));
   hintMarker.rotation.x = Math.PI; hintMarker.visible = false; scene.add(hintMarker);
 
-  if (detailed) scene.add(buildOrchard(GROUND_Y));
-  const nBurst = PARTICLE_COUNT[q.particles];
+  if (detailed) scene.add(buildOrchard(GROUND_Y, q.budget));
+  const nBurst = sparkCap(q);
   if (nBurst) bursts = new Bursts(scene, T.dot, nBurst);
-  if (q.background === 'animated') motes = new Motes(scene, T.dot, 90, [-6, WORLD_W + 6, 0, 34, -8, 9]);
+  if (q.background === 'animated') motes = new Motes(scene, T.dot, q.budget.motes, [-6, WORLD_W + 6, 0, 34, -8, 9]);
 
   applyShadows();
   resize();
@@ -527,6 +539,7 @@ const SKIN = [null,
 function fruitResources() {
   if (fruitRes) return fruitRes;
   const detailed = gfx.q.detail === 'detailed';
+  const b = gfx.q.budget, lambert = b.material === 'lambert';
   const colors = PALETTES[save.settings.palette] || PALETTES.default;
   const leafShape = new THREE.Shape();
   leafShape.moveTo(0, 0);
@@ -535,8 +548,9 @@ function fruitResources() {
   const res = {
     tiers: [],
     leafGeo: detailed ? new THREE.ShapeGeometry(leafShape, 5) : new THREE.CircleGeometry(1, 6),
-    stemMat: new THREE.MeshStandardMaterial({ color: 0x5a3a22, roughness: 1 }),
-    leafMat: new THREE.MeshStandardMaterial({ color: 0x3f7d2c, roughness: detailed ? 0.6 : 0.8, side: THREE.DoubleSide }),
+    stemMat: lambert ? new THREE.MeshLambertMaterial({ color: 0x5a3a22 }) : new THREE.MeshStandardMaterial({ color: 0x5a3a22, roughness: 1 }),
+    leafMat: lambert ? new THREE.MeshLambertMaterial({ color: 0x3f7d2c, side: THREE.DoubleSide })
+      : new THREE.MeshStandardMaterial({ color: 0x3f7d2c, roughness: detailed ? 0.6 : 0.8, side: THREE.DoubleSide }),
   };
   if (detailed) {
     textures.skin.wrapS = textures.skin.wrapT = THREE.RepeatWrapping;
@@ -544,7 +558,7 @@ function fruitResources() {
   }
   for (let tier = 1; tier <= 10; tier++) {
     const r = TIER_R[tier], sk = SKIN[tier];
-    const bodyGeo = detailed ? new THREE.SphereGeometry(r, 40, 28) : new THREE.SphereGeometry(r, 28, 20);
+    const bodyGeo = new THREE.SphereGeometry(r, b.sphere[0], b.sphere[1]);
     if (detailed && sk.ribs) {
       // shallow pumpkin ribs (±3% of the radius) — silhouette cue only
       const p = bodyGeo.attributes.position;
@@ -555,19 +569,24 @@ function fruitResources() {
       }
       bodyGeo.computeVertexNormals();
     }
-    const bodyMat = detailed
-      ? new THREE.MeshPhysicalMaterial({
-        color: colors[tier], roughness: sk.rough, metalness: 0,
-        clearcoat: sk.cc, clearcoatRoughness: 0.25,
-        bumpMap: textures.skin, bumpScale: sk.bump, roughnessMap: textures.skin,
-        sheen: sk.sheen || 0, sheenRoughness: 0.6, sheenColor: new THREE.Color(0xfff0e0),
-      })
-      : new THREE.MeshStandardMaterial({ color: colors[tier], roughness: 0.55, metalness: 0.05 });
+    const relief = b.skinBump ? { bumpMap: textures.skin, bumpScale: sk.bump, roughnessMap: textures.skin } : {};
+    const bodyMat = lambert ? new THREE.MeshLambertMaterial({ color: colors[tier] })
+      : detailed && b.material === 'physical'
+        ? new THREE.MeshPhysicalMaterial({
+          color: colors[tier], roughness: sk.rough, metalness: 0,
+          clearcoat: sk.cc, clearcoatRoughness: 0.25, ...relief,
+          sheen: sk.sheen || 0, sheenRoughness: 0.6, sheenColor: new THREE.Color(0xfff0e0),
+        })
+        : detailed
+          ? new THREE.MeshStandardMaterial({ color: colors[tier], roughness: sk.rough, metalness: 0, ...relief })
+          : new THREE.MeshStandardMaterial({ color: colors[tier], roughness: 0.55, metalness: 0.05 });
     res.tiers[tier] = {
       bodyGeo, bodyMat,
       stemGeo: new THREE.CylinderGeometry(r * 0.08, r * 0.12, r * 0.5, 6),
       ringGeo: new THREE.TorusGeometry(r * 0.7, r * 0.05, 6, 24, Math.PI * 2),
-      ringMat: new THREE.MeshStandardMaterial({ color: colors[tier], emissive: colors[tier], emissiveIntensity: 0.5 }),
+      ringMat: lambert ? new THREE.MeshLambertMaterial({ color: colors[tier], emissive: colors[tier], emissiveIntensity: 0.5 })
+        : new THREE.MeshStandardMaterial({ color: colors[tier], emissive: colors[tier], emissiveIntensity: 0.5 }),
+      leavesGeo: leafCluster(res.leafGeo, tier, r, detailed),
       color: colors[tier],
     };
   }
@@ -588,30 +607,60 @@ function makeFruitMesh(tier, ghost = false) {
   g.add(body);
   const stem = new THREE.Mesh(t.stemGeo, own(res.stemMat));
   stem.position.y = r * 0.95; g.add(stem);
-  // leaves: count = tier (visual marker distinct from colour)
-  const leafMat = own(res.leafMat);
-  const detailed = gfx.q.detail === 'detailed';
-  const ls = Math.max(0.14, r * 0.22);
-  for (let i = 0; i < tier; i++) {
-    const leaf = new THREE.Mesh(res.leafGeo, leafMat);
-    const a = (i / tier) * Math.PI * 2;
-    if (detailed) {
-      // pointed leaf radiating from the stem, tilted up a little
-      leaf.scale.setScalar(ls * 2.2);
-      leaf.position.set(0, r * 1.0, 0);
-      leaf.rotation.set(-Math.PI / 2, a, 0.35, 'YZX');
-    } else {
-      leaf.scale.setScalar(ls);
-      leaf.position.set(Math.cos(a) * r * 0.5, r * 1.02, Math.sin(a) * r * 0.5);
-      leaf.rotation.set(-Math.PI / 2 + 0.4, 0, a);
-    }
-    g.add(leaf);
-  }
+  // leaves: count = tier (visual marker distinct from colour), pre-merged into one mesh per tier
+  g.add(new THREE.Mesh(t.leavesGeo, own(res.leafMat)));
   // emissive ring (extra cue)
   const ring = new THREE.Mesh(t.ringGeo, own(t.ringMat));
   ring.rotation.x = Math.PI / 2;
   g.add(ring);
   return g;
+}
+
+// The tier's leaf ring as one geometry (one draw call per fruit instead of one per leaf; same placement).
+function leafCluster(leafGeo, tier, r, detailed) {
+  const ls = Math.max(0.14, r * 0.22);
+  const o = new THREE.Object3D();
+  const parts = [];
+  for (let i = 0; i < tier; i++) {
+    const a = (i / tier) * Math.PI * 2;
+    if (detailed) {
+      // pointed leaf radiating from the stem, tilted up a little
+      o.scale.setScalar(ls * 2.2);
+      o.position.set(0, r * 1.0, 0);
+      o.rotation.set(-Math.PI / 2, a, 0.35, 'YZX');
+    } else {
+      o.scale.setScalar(ls);
+      o.position.set(Math.cos(a) * r * 0.5, r * 1.02, Math.sin(a) * r * 0.5);
+      o.rotation.set(-Math.PI / 2 + 0.4, 0, a);
+    }
+    o.updateMatrix();
+    parts.push(leafGeo.clone().applyMatrix4(o.matrix));
+  }
+  return mergeGeos(parts);
+}
+
+// Concatenate indexed geometries that share the same attributes into one.
+function mergeGeos(geos) {
+  const names = Object.keys(geos[0].attributes);
+  const out = new THREE.BufferGeometry();
+  let vtx = 0;
+  const idx = [];
+  for (const g of geos) {
+    const n = g.attributes.position.count;
+    if (g.index) for (const i of g.index.array) idx.push(i + vtx);
+    else for (let i = 0; i < n; i++) idx.push(i + vtx);
+    vtx += n;
+  }
+  for (const name of names) {
+    const size = geos[0].attributes[name].itemSize;
+    const arr = new Float32Array(vtx * size);
+    let off = 0;
+    for (const g of geos) { arr.set(g.attributes[name].array, off); off += g.attributes[name].array.length; }
+    out.setAttribute(name, new THREE.BufferAttribute(arr, size));
+  }
+  out.setIndex(idx);
+  for (const g of geos) g.dispose();
+  return out;
 }
 
 function disposeFruitMesh(m) {
@@ -643,13 +692,15 @@ window.addEventListener('resize', resize);
 
 // Resolve saved graphics settings and apply them live (no reload).
 function applyGraphics() {
-  gfx.q = resolve(save.settings.gfx, gfx.detected);
+  gfx.q = resolve(save.settings.gfx, gfx.detected, gfx.level);
   const q = gfx.q;
   canvas.dataset.gfxPreset = q.preset;
   document.body.dataset.gfxPreset = q.preset;
+  // Frosted (backdrop-filter) overlays only where the budget allows a per-frame blur (High/Ultra).
+  document.body.classList.toggle('gfx-hud-blur', q.budget.material === 'physical');
   gfx.adaptiveScale = 1;
   gfx.frames = [];
-  const key = [q.detail, q.reflections, q.particles, q.background, save.settings.palette].join('|');
+  const key = [q.preset, q.detail, q.reflections, q.particles, q.background, save.settings.palette].join('|');
   if (!scene || key !== gfx.sceneKey) {
     gfx.sceneKey = key;
     buildScene();
@@ -1281,7 +1332,8 @@ function updateGfxSummary() {
   const px = [Math.round(gfx.size[0] * gfx.pixelRatio), Math.round(gfx.size[1] * gfx.pixelRatio)];
   const words = {};
   for (const k of ['noShadows', 'shadows', 'ao', 'aoHigh', 'bloom', 'reflections', 'noAA', 'particles']) words[k] = gt('sum_' + k);
-  $('gfx-summary').textContent = `${gfx.gpu || gt('gpuUnknown')} · ${describe(q, px, words)}`;
+  const level = gfx.level != null ? ` · ${gt('level', { n: gfx.level })}` : '';
+  $('gfx-summary').textContent = `${gfx.gpu || gt('gpuUnknown')}${level} · ${describe(q, px, words)}`;
 }
 
 // ---- pause ----

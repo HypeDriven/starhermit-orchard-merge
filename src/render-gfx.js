@@ -23,10 +23,15 @@ function rng(seed) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
-function canvas2d(w, h) {
+// Texture scale from the preset's budget (makeTextures): every texture is authored at w×h and drawn
+// into a canvas of w·k × h·k, so the look is the same at every size.
+let texScale = 1;
+function canvas2d(w, h, k = texScale) {
   const c = document.createElement('canvas');
-  c.width = w; c.height = h;
-  return [c, c.getContext('2d')];
+  c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+  const g = c.getContext('2d');
+  g.scale(c.width / w, c.height / h);
+  return [c, g];
 }
 function tex(c, { srgb = true, repeat = null } = {}) {
   const t = new THREE.CanvasTexture(c);
@@ -37,8 +42,12 @@ function tex(c, { srgb = true, repeat = null } = {}) {
 }
 
 // ---------------------------------------------------------------- procedural textures
-/** All textures for the detailed stall. Deterministic (fixed seeds); dispose via disposeTextures. */
-export function makeTextures() {
+/**
+ * All textures for the detailed stall at the budget's scale `k` (0.5 Low … 2 Ultra). Deterministic
+ * (fixed seeds); dispose via disposeTextures.
+ */
+export function makeTextures(k = 1) {
+  texScale = k;
   const T = {};
   // Wood planks with grain streaks (table, posts, crate frame).
   {
@@ -74,7 +83,7 @@ export function makeTextures() {
     }
     T.awning = tex(c, { repeat: [3, 1] });
     const [c2, g2] = canvas2d(256, 64);
-    g2.drawImage(c, 0, 0);
+    g2.drawImage(c, 0, 0, 256, 64);
     g2.globalCompositeOperation = 'destination-in';
     g2.beginPath();
     g2.moveTo(0, 0); g2.lineTo(256, 0); g2.lineTo(256, 40);
@@ -107,7 +116,7 @@ export function makeTextures() {
   }
   // Fruit skin micro-relief (bump + roughness), grayscale, linear.
   {
-    const [c, g] = canvas2d(128, 64);
+    const [c, g] = canvas2d(128, 64, 1);
     const r = rng(53);
     g.fillStyle = '#808080'; g.fillRect(0, 0, 128, 64);
     for (let i = 0; i < 900; i++) {
@@ -144,7 +153,7 @@ export function makeTextures() {
   }
   // Soft round sprite for particles and motes.
   {
-    const [c, g] = canvas2d(64, 64);
+    const [c, g] = canvas2d(64, 64, 1);
     const rg = g.createRadialGradient(32, 32, 0, 32, 32, 32);
     rg.addColorStop(0, 'rgba(255,255,255,1)');
     rg.addColorStop(0.4, 'rgba(255,255,255,0.8)');
@@ -174,7 +183,7 @@ export function makeEnvironment(renderer) {
  * Distant orchard (instanced trees with fruit), rolling hills. One draw call per part.
  * Everything sits far behind the stall and never intersects the playfield.
  */
-export function buildOrchard(groundY) {
+export function buildOrchard(groundY, budget = { trees: 1, fruitPerTree: 6 }) {
   const group = new THREE.Group();
   const r = rng(97);
   const spots = [];
@@ -183,7 +192,10 @@ export function buildOrchard(groundY) {
       const x = -150 + i * 20 + (row % 2) * 10 + (r() - 0.5) * 6;
       const z = -45 - row * 26 + (r() - 0.5) * 6;
       if (z > -60 && x > -30 && x < 50) continue; // keep the view behind the stall open
-      spots.push([x, z, 0.8 + r() * 0.5]);
+      const k = 0.8 + r() * 0.5;
+      // Lower budgets thin the grove evenly (the front row always stays).
+      if (row > 0 && budget.trees < 1 && (i + row) % Math.round(1 / budget.trees) !== 0) continue;
+      spots.push([x, z, k]);
     }
   }
   const trunkGeo = new THREE.CylinderGeometry(0.7, 1.0, 8, 6);
@@ -193,7 +205,7 @@ export function buildOrchard(groundY) {
   const trunks = new THREE.InstancedMesh(trunkGeo, new THREE.MeshStandardMaterial({ color: 0x6b4a2f, roughness: 0.95 }), spots.length);
   const crowns = new THREE.InstancedMesh(crownGeo, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, flatShading: true }), spots.length);
   const fruitGeo = new THREE.SphereGeometry(0.75, 8, 6);
-  const perTree = 6;
+  const perTree = budget.fruitPerTree;
   const fruits = new THREE.InstancedMesh(fruitGeo, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 }), spots.length * perTree);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
   const col = new THREE.Color();
@@ -369,6 +381,15 @@ const GradeShader = {
     }`,
 };
 
+// Run a post pass at a fraction of the frame: EffectComposer.addPass/setSize hand every pass the full
+// frame size, so the pass's own setSize applies the budget's scale (half-res bloom/GTAO below Ultra).
+function atScale(pass, k) {
+  if (!(k < 1)) return pass;
+  const setSize = pass.setSize.bind(pass);
+  pass.setSize = (w, h) => setSize(Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)));
+  return pass;
+}
+
 /**
  * RenderPass → GTAO → UnrealBloom → grade → OutputPass → SMAA/FXAA, rebuilt when its key
  * changes. MSAA uses a multisampled composer target. Never throws: on failure `failed` is set
@@ -383,7 +404,7 @@ export class PostChain {
   }
   invalidate() { this.key = null; }
   keyFor(q, w, h, pr) {
-    return q.post ? [q.ao, q.bloom, q.grade, q.antialias, w, h, pr].join('|') : 'none';
+    return q.post ? [q.ao, q.bloom, q.grade, q.antialias, q.budget?.aoRes, q.budget?.bloomRes, w, h, pr].join('|') : 'none';
   }
   sync(q, scene, camera, w, h, pr) {
     const key = this.keyFor(q, w, h, pr);
@@ -420,11 +441,11 @@ export class PostChain {
         ao.blendIntensity = 0.7;
         ao.updateGtaoMaterial({ radius: 1.2, distanceExponent: 1.4, thickness: 1.5, scale: 1.0, samples: q.ao === 'high' ? 16 : 8 });
         ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: q.ao === 'high' ? 6 : 4, rings: 2, samples: q.ao === 'high' ? 16 : 8 });
-        composer.addPass(ao);
+        composer.addPass(atScale(ao, q.budget?.aoRes ?? 1));
       }
       if (q.bloom === 'on') {
         // High threshold: only emissive accents (warning line, merge flashes) and hot highlights.
-        composer.addPass(new UnrealBloomPass(new THREE.Vector2(w, h), 0.35, 0.35, 0.92));
+        composer.addPass(atScale(new UnrealBloomPass(new THREE.Vector2(w, h), 0.35, 0.35, 0.92), q.budget?.bloomRes ?? 1));
       }
       if (q.grade === 'on') composer.addPass(new ShaderPass(GradeShader));
       composer.addPass(new OutputPass());

@@ -163,6 +163,7 @@ async function runPass(browser, vp, port) {
       await page.selectOption('#set-quality', 'high');
       await presetIs('high');
       if (!/bloom/.test(await summary())) throw new Error(`high summary lacks bloom: ${await summary()}`);
+      if (!/ · Level 0 · /.test(await summary())) throw new Error(`summary lacks the hardware level: ${await summary()}`);
       const fromPreset = await page.locator('#gfx-bloom option[value="preset"]').textContent();
       if (fromPreset !== 'From preset (On)') throw new Error(`bloom preset label "${fromPreset}"`);
       // one override, applied live
