@@ -16,14 +16,25 @@ const token = 'h.' + b64u({ sub: 'user-123456', game_scope: 'om-slug', exp: Math
 const unrefTimeout = (f, ms) => { const t = setTimeout(f, ms); t.unref(); return t; };
 
 function fakeServer() {
-  const calls = [], saves = {}, kv = {};
+  const calls = [], saves = {}, kv = {}, etags = {};
+  let version = 0;
   const fetch = async (url, init = {}) => {
     const method = init.method || 'GET';
     calls.push([method, url]);
     const r = (status, body) => new Response(body == null ? null : body, { status });
     if (url.includes('/cloud-saves/')) {
-      const key = decodeURIComponent(url.split('/cloud-saves/')[1]);
-      if (method === 'PUT') { saves[key] = Buffer.from(JSON.parse(init.body).dataBase64, 'base64'); return r(200, '{}'); }
+      // Conditional writes like the platform: If-Match / If-None-Match after a
+      // load, 412 with the current etag when stale, { etag } on success.
+      const tail = decodeURIComponent(url.split('/cloud-saves/')[1]);
+      const key = tail.replace(/\/info$/, '');
+      const h = new Headers(init.headers || {});
+      if (tail.endsWith('/info')) return r(200, JSON.stringify(saves[key] ? { exists: true, etag: etags[key] } : { exists: false }));
+      if (method === 'PUT') {
+        if ((h.get('If-Match') && h.get('If-Match') !== etags[key]) || (h.get('If-None-Match') === '*' && saves[key])) return r(412, JSON.stringify({ etag: etags[key] || null }));
+        saves[key] = Buffer.from(JSON.parse(init.body).dataBase64, 'base64');
+        etags[key] = '"v' + (++version) + '"';
+        return r(200, JSON.stringify({ etag: etags[key] }));
+      }
       return saves[key] ? r(200, saves[key]) : r(404);
     }
     if (url.endsWith('/profile')) return r(200, JSON.stringify({ username: 'u', nickname: 'Tess' }));
@@ -32,7 +43,7 @@ function fakeServer() {
     if (url.endsWith('/controls')) return r(200, JSON.stringify({ actions: [{ action: 'hint', codes: ['KeyJ'] }] }));
     return r(404);
   };
-  return { calls, saves, kv, fetch };
+  return { calls, saves, kv, etags, fetch, bump(key) { etags[key] = '"v' + (++version) + '"'; } };
 }
 
 function install(hash, srv, hostname = 'om-slug.starhermit.com') {
@@ -99,4 +110,58 @@ test('standalone: no token means no platform fetch at all', async () => {
   assert.equal(await P.fetchLeaderboard(), null);
   assert.deepEqual(await P.submitScore(500), { posted: false, rank: null });
   assert.equal(srv.calls.length, 0);
+});
+
+test('sign-in is offered on a StarHermit UUID host without a token', async () => {
+  const srv = fakeServer();
+  install('', srv, '0b9d6f2e-3c4a-4e5b-9a7c-1d2e3f405162.starhermit.com');
+  const { platform: P } = await import('../src/platform.js?uuid');
+  P.init();
+  assert.equal(P.canSignIn(), true);
+});
+
+test('cloud-save conflict: a write that lost to another device re-reads, merges and saves again', async () => {
+  const srv = fakeServer();
+  const win = install('#game_token=' + token, srv, 'om-slug.starhermit.com');
+  const { platform: P } = await import('../src/platform.js?conflict');
+  const { mergeSaves } = await import('../src/save-merge.js');
+  P.init();
+  let local = { settings: { mute: false }, journey: { unlocked: 3, cleared: { 0: 300, 1: 200 } }, daily: {}, leaderboard: [], achievements: {}, lifetime: 500, resume: null };
+  P.hooks.buildSaveDoc = () => ({ version: 1, save: local });
+  P.hooks.adoptRemote = (doc) => { local = mergeSaves(doc.save, local); };
+  await P.loadCloud();                             // empty slot: seeded; writes are conditional from now on
+  // Another device saves further progress.
+  const other = { settings: { mute: true }, journey: { unlocked: 6, cleared: { 0: 900, 4: 700 } }, daily: { '2026-10-16': { score: 1200, hash: 1 } },
+    leaderboard: [{ mode: 'daily', score: 1200, hash: 1, date: '2026-10-16T00:00:00.000Z' }], achievements: { 'first-completion': '2026-10-01' }, lifetime: 4000, resume: null };
+  srv.saves['game:om-slug'] = Buffer.from(await win.StarHermit._zip('save.json', new TextEncoder().encode(JSON.stringify({ version: 1, save: other }))));
+  srv.bump('game:om-slug');
+  local = { ...local, lifetime: 800, resume: { mode: 'practice' } };
+  P.scheduleCloudPush();
+  await P.flushCloud();                            // 412 → saveconflict → resolveConflict()
+  for (let i = 0; i < 50 && !(local.lifetime === 4000 && P.syncState === 'synced'); i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(P.syncState, 'synced');
+  const stored = JSON.parse(new TextDecoder().decode(await win.StarHermit._unzip(srv.saves['game:om-slug']))).save;
+  assert.deepEqual(stored.journey, { unlocked: 6, cleared: { 0: 900, 1: 200, 4: 700 } });
+  assert.equal(stored.lifetime, 4000);
+  assert.equal(stored.daily['2026-10-16'].score, 1200);
+  assert.ok(stored.achievements['first-completion']);
+  assert.deepEqual(stored.resume, { mode: 'practice' });   // this device's run in progress
+  assert.equal(stored.settings.mute, false);              // this device's settings
+});
+
+test('mergeSaves keeps the better result of each side', async () => {
+  const { mergeSaves } = await import('../src/save-merge.js');
+  const a = { settings: { tutorialDone: true }, journey: { unlocked: 5, cleared: { 1: 100 } }, daily: { d: { score: 50 } },
+    leaderboard: [{ mode: 'daily', score: 10, hash: 1, date: 'x' }], achievements: { a: '2026-01-02' }, lifetime: 10, resume: { r: 1 } };
+  const b = { settings: { tutorialDone: false, mute: true }, journey: { unlocked: 2, cleared: { 1: 300, 2: 5 } }, daily: { d: { score: 20 }, e: { score: 1 } },
+    leaderboard: [{ mode: 'daily', score: 10, hash: 1, date: 'x' }, { mode: 'journey', score: 99, hash: 2, date: 'y' }], achievements: { a: '2026-01-01', b: '2026-01-03' }, lifetime: 5, resume: null };
+  const m = mergeSaves(a, b);
+  assert.deepEqual(m.journey, { unlocked: 5, cleared: { 1: 300, 2: 5 } });
+  assert.deepEqual(m.daily, { d: { score: 50 }, e: { score: 1 } });
+  assert.deepEqual(m.leaderboard.map((e) => e.score), [99, 10]);
+  assert.deepEqual(m.achievements, { a: '2026-01-01', b: '2026-01-03' });
+  assert.equal(m.lifetime, 10);
+  assert.equal(m.settings.tutorialDone, true);
+  assert.equal(m.settings.mute, true);
+  assert.deepEqual(m.resume, { r: 1 });
 });

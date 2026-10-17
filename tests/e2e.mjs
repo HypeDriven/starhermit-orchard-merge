@@ -35,10 +35,14 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import os from 'node:os';
 import { chromium } from 'playwright-core';
+import { stubStarHermit, launchToken } from './starhermit-e2e.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SHOT = (stage, vp) => `/tmp/orchard-merge-e2e-${stage}-${vp}.png`;
+// Language-step screenshots go to E2E_SHOT_DIR (default: the OS temp dir).
+const LANG_SHOT = (name) => path.join(process.env.E2E_SHOT_DIR || os.tmpdir(), `orchard-merge-e2e-${name}.png`);
 const browserNoise = /GL Driver Message|GPU stall due to ReadPixels|Automatic fallback to software WebGL|EnableWebGLDeveloperExtensions/i;
 
 const MIME = {
@@ -99,9 +103,10 @@ async function runPass(browser, vp, port) {
   const page = await context.newPage();
   const errors = [];
   const ownApi = [];
+  let apiStubbed = false;   // only the language step stubs the StarHermit API on this origin
   page.on('request', (r) => {
     const u = new URL(r.url());
-    if (u.port === String(port) && /^\/(api|ws)(\/|$)/.test(u.pathname)) ownApi.push(`${r.method()} ${u.pathname}`);
+    if (!apiStubbed && u.port === String(port) && /^\/(api|ws)(\/|$)/.test(u.pathname)) ownApi.push(`${r.method()} ${u.pathname}`);
   });
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
   page.on('console', (m) => {
@@ -274,6 +279,71 @@ async function runPass(browser, vp, port) {
       await page.click('#br-title');
       await visible(page, '#scr-title');
       await page.screenshot({ path: SHOT('back-to-title', vp) });
+    });
+
+    await step(`[${vp}] language: Automatic follows the StarHermit preferred language; switching mid-run re-renders in place, syncs ui.language; report a problem`, async () => {
+      apiStubbed = true;
+      const calls = await stubStarHermit(page, { preferredLanguage: 'fr-CA' });
+      await page.goto('about:blank');
+      await page.goto(`http://127.0.0.1:${port}/index.html#game_token=${launchToken()}`, { waitUntil: 'load' });
+      await page.waitForFunction(() => document.documentElement.lang === 'fr-CA');
+      await visible(page, '#scr-title');
+      if ((await page.textContent('#bt-play')).trim() !== '▶ Jouer') throw new Error('title not in French');
+      await page.click('#bt-practice');
+      await visible(page, '#scr-setup');
+      if ((await page.textContent('#setup-h')).trim() !== 'Entraînement') throw new Error('setup not in French');
+      await page.click('#setup-start');
+      await dropReady(page);
+      const objective = isMobile ? '#objective-top' : '#objective';
+      if (!/Entraînement/.test(await page.textContent(objective))) throw new Error('objective not in French');
+      await page.click(isMobile ? '#tt-pause' : '#btn-pause', { force: true });
+      await visible(page, '#scr-pause');
+      await page.click('#bp-settings');
+      await visible(page, '#scr-settings');
+      const choice = page.locator('[data-game-language="choice"]');
+      await choice.scrollIntoViewIfNeeded();
+      const autoLabel = await choice.locator('option').first().textContent();
+      if (autoLabel !== 'Automatique — Français (Canada)') throw new Error('Automatic label not resolved: ' + autoLabel);
+      await choice.selectOption('de-DE');
+      await page.waitForFunction(() => document.documentElement.lang === 'de-DE');
+      await page.waitForFunction(() => /Im Konto gespeichert/.test(document.querySelector('[data-game-language="status"]').textContent));
+      if (calls.settings['ui.language']?.choice !== 'de-DE') throw new Error('ui.language not saved: ' + JSON.stringify(calls.settings));
+      if ((await page.textContent('#set-h')).trim() !== 'Einstellungen') throw new Error('settings title not re-rendered');
+      if ((await page.textContent('#gfx-h')).trim() !== 'Grafik') throw new Error('graphics labels not re-rendered');
+      if (!/Übung/.test(await page.textContent(objective))) throw new Error('objective not re-rendered');
+      await page.locator('[data-game-report="title"]').scrollIntoViewIfNeeded();
+      await page.fill('[data-game-report="title"]', 'Test report');
+      await page.click('[data-game-report="send"]');
+      await page.waitForFunction(() => /Bericht gesendet/.test(document.querySelector('[data-game-report="status"]').textContent));
+      if (!calls.reports?.[0] || calls.reports[0].kind !== 'bug') throw new Error('report not posted');
+      await page.locator('#set-h').scrollIntoViewIfNeeded();
+      await page.screenshot({ path: LANG_SHOT('settings-' + vp) });
+      await page.click('#set-close');
+      await visible(page, '#scr-pause');
+      if ((await page.textContent('#bp-resume')).trim() !== 'Fortsetzen') throw new Error('pause menu not re-rendered');
+      await page.click('#bp-resume');
+      await dropReady(page);   // same run continues (the drop button re-enables without a countdown)
+      // HUD buttons stay clear and inside the viewport in German.
+      for (const id of isMobile ? ['tt-drop', 'tt-hint', 'tt-undo', 'tt-skip', 'tt-pause'] : ['btn-drop', 'btn-hint', 'btn-pause']) {
+        const ok = await page.locator('#' + id).evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+          return r.right <= window.innerWidth + 0.5 && r.bottom <= window.innerHeight + 0.5 && (hit === el || el.contains(hit));
+        });
+        if (!ok) throw new Error(`#${id} covered or cut off in German`);
+      }
+      await page.screenshot({ path: LANG_SHOT('hud-' + vp) });
+      await page.click(isMobile ? '#tt-pause' : '#btn-pause', { force: true });
+      await visible(page, '#scr-pause');
+      await page.click('#bp-settings');
+      await choice.scrollIntoViewIfNeeded();
+      await choice.selectOption('auto');
+      await page.waitForFunction(() => document.documentElement.lang === 'fr-CA');
+      await page.click('#set-close');
+      await page.click('#bp-leave');
+      await visible(page, '#scr-title');
+      await page.unroute(/\/api\/v1\//);
+      apiStubbed = false;
     });
   } finally {
     await context.close();

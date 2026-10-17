@@ -4,7 +4,9 @@
 import * as THREE from 'three';
 import { platform } from './platform.js';
 import { PRESETS, CATEGORIES, SHADOW_MAP, PARTICLE_COUNT, detectPreset, resolve, presetTier, describe, choosePreset } from './gfx.js';
-import { pickLocale, translator } from './gfx-i18n.js';
+import { translator } from './gfx-i18n.js';
+import { T, N, initLanguage, getLang, onLanguage } from './i18n.js';
+import { mergeSaves } from './save-merge.js';
 import { makeTextures, disposeTextures, makeEnvironment, buildOrchard, Motes, Bursts, PostChain } from './render-gfx.js';
 
 const R = globalThis.OrchardRules;
@@ -23,17 +25,22 @@ const PALETTES = {
   'night-orchard': [null,'#b33951','#c2543a','#d07a2e','#d69f2d','#b8b52e','#7fb069','#3d9971','#2f7f8f','#3a5fa8','#5a3d8f'],
   deuteranopia: [null,'#d55e00','#e69f00','#f0e442','#009e73','#56b4e9','#0072b2','#332288','#cc79a7','#88ccee','#ffffff'],
 };
-const TIER_NAMES = [null,'Cherry','Strawberry','Plum','Orange','Apple','Pear','Peach','Grapefruit','Melon','Pumpkin'];
+// Fruit names are keys; translate with tierName() at display time.
+const TIER_NAMES = [null, N('Cherry'), N('Strawberry'), N('Plum'), N('Orange'), N('Apple'), N('Pear'), N('Peach'), N('Grapefruit'), N('Melon'), N('Pumpkin')];
+const tierName = (tier) => (TIER_NAMES[tier] ? T(TIER_NAMES[tier]) : '—');
+
+// Game language (sh-language.js): resolves before any text is drawn.
+initLanguage();
 
 // Small static achievement set (spec §6): first completion, mechanic mastery,
 // a sustained streak, a difficult content milestone, and a long-term goal.
 // Keys are stable lowercase identifiers; unlocks are idempotent.
 const ACHIEVEMENTS = {
-  'first-completion': 'First harvest — complete any run',
-  'merge-master': 'Mechanic mastery — merge up to tier 8',
-  'daily-streak-3': 'Regular picker — play the daily on 3 different days',
-  'journey-complete': 'Milestone — clear journey stage 40',
-  'orchard-keeper': 'Long game — 25,000 lifetime points',
+  'first-completion': N('First harvest — complete any run'),
+  'merge-master': N('Mechanic mastery — merge up to tier 8'),
+  'daily-streak-3': N('Regular picker — play the daily on 3 different days'),
+  'journey-complete': N('Milestone — clear journey stage 40'),
+  'orchard-keeper': N('Long game — 25,000 lifetime points'),
 };
 
 // ---------------- 2. Persistence ----------------
@@ -80,7 +87,7 @@ save.lifetime = save.lifetime || 0;
 function unlock(key) {
   if (!ACHIEVEMENTS[key] || save.achievements[key]) return false;
   save.achievements[key] = new Date(now()).toISOString();
-  announce(`Achievement unlocked: ${ACHIEVEMENTS[key]}.`);
+  announce(T('Achievement unlocked: {name}.', { name: T(ACHIEVEMENTS[key]) }));
   run.newAchievements.push(key);
   return true;
 }
@@ -97,19 +104,22 @@ function persist() {
 
 // ---------------- 2b. StarHermit platform (src/platform.js over the SDK) ----------------
 const SYNC_LABELS = {
-  saving: 'cloud save: saving…',
-  synced: 'cloud save: synced',
-  error: 'cloud save unreachable — progress is safe on this device',
-  offline: 'connecting…',
+  saving: N('cloud save: saving…'),
+  synced: N('cloud save: synced'),
+  error: N('cloud save unreachable — progress is safe on this device'),
+  offline: N('connecting…'),
 };
 const hostedAtLaunch = platform.init();   // reads #game_token / #access_token once
 platform.hooks.buildSaveDoc = () => {
   const { sum, ...rest } = save;
   return { version: SAVE_VERSION, savedAt: new Date().toISOString(), save: rest };
 };
+// The cloud copy never simply replaces this device's progress: mergeSaves keeps
+// the better result of each (boot load and saveconflict alike).
 platform.hooks.adoptRemote = (doc) => {
+  const merged = mergeSaves(doc.save, save);
   for (const k of Object.keys(save)) delete save[k];
-  Object.assign(save, JSON.parse(JSON.stringify(doc.save)));
+  Object.assign(save, merged);
   save.achievements = save.achievements || {};
   save.lifetime = save.lifetime || 0;
   save.version = SAVE_VERSION;
@@ -118,8 +128,9 @@ platform.hooks.adoptRemote = (doc) => {
   applySettingsOnlyLooks();
   audio.applyVolumes();
   applyGraphics();   // rebuilds the scene only if palette/scene-level tiers changed
-  gotoTitle();
+  if (run.phase === 'title') gotoTitle();   // never interrupt a run in progress
 };
+platform.hooks.playerName = (id) => (id ? T('Player {id}', { id }) : T('Player'));
 platform.hooks.onStatus = () => updateProfileLine();
 
 // Player preferences mirrored to the StarHermit settings KV (the account value
@@ -708,11 +719,11 @@ function journeyStage(i) {
     difficulty: i < 12 ? 'easy' : i < 28 ? 'normal' : 'hard' };
 }
 const CHALLENGES = [
-  { id: 'move-limit', name: 'Move limit', desc: 'Reach 1200 points in at most 25 drops.',
+  { id: 'move-limit', name: N('Move limit'), desc: N('Reach 1200 points in at most 25 drops.'),
     goals: { targetScore: 1200, maxDrops: 25 }, difficulty: 'normal' },
-  { id: 'time-limit', name: 'Time limit', desc: 'Reach 1500 points within 60 seconds of sim time.',
+  { id: 'time-limit', name: N('Time limit'), desc: N('Reach 1500 points within 60 seconds of sim time.'),
     goals: { targetScore: 1500, timeLimitTicks: 3600 }, difficulty: 'normal' },
-  { id: 'high-line', name: 'High warning line', desc: 'Hard pool, no mercy: reach tier 7 with ≤ 35 drops.',
+  { id: 'high-line', name: N('High warning line'), desc: N('Hard pool, no mercy: reach tier 7 with ≤ 35 drops.'),
     goals: { requireTier: 7, maxDrops: 35 }, difficulty: 'hard' },
 ];
 
@@ -751,7 +762,7 @@ function runCountdown(done) {
   let n = 3;
   const tickFn = () => {
     if (n > 0) { el.textContent = n; audio.countdown(n); n--; setTimeout(tickFn, 700); }
-    else { el.textContent = 'Go!'; audio.countdown(0); setTimeout(() => { el.classList.add('hidden'); done(); }, 400); }
+    else { el.textContent = T('Go!'); audio.countdown(0); setTimeout(() => { el.classList.add('hidden'); done(); }, 400); }
   };
   tickFn();
 }
@@ -776,7 +787,7 @@ function resumeRun() {
   showScreen(null); $('hud').classList.remove('hidden');
   const away = Math.max(0, now() - r.savedAt);
   const mins = Math.floor(away / 60000);
-  announce(`Resumed. You were away ${mins} minute${mins === 1 ? '' : 's'}.`);
+  announce(mins === 1 ? T('Resumed. You were away 1 minute.') : T('Resumed. You were away {n} minutes.', { n: mins }));
   updateObjective(); updateHUD(true);
 }
 
@@ -807,7 +818,7 @@ function undo() {
   const snap = run.undoStack.pop();
   run.state = R.restore(snap);
   run.commands.pop();
-  announce('Undid last drop.');
+  announce(T('Undid last drop.'));
   serializeResume();
   updateHUD(true);
 }
@@ -829,7 +840,7 @@ function showHint() {
   clearTimeout(hintTimer);
   const marker = hintMarker; // buildScene may swap it out before the timer fires
   hintTimer = setTimeout(() => { marker.visible = false; }, 2500);
-  announce(`Hint: drop near position ${x.toFixed(1)}.`);
+  announce(T('Hint: drop near position {x}.', { x: x.toFixed(1) }));
 }
 
 // events -> fx, speech, mode logic
@@ -842,7 +853,7 @@ function drainEvents() {
       audio.merge(ev.tier);
       vibrate(30);
       shakeAmp = save.settings.reducedMotion ? 0 : Math.min(0.5, 0.1 + ev.tier * 0.03);
-      announce(`Merged into ${TIER_NAMES[ev.tier]}, plus ${ev.points} points. Score ${s.score}.`);
+      announce(T('Merged into {fruit}, plus {points} points. Score {score}.', { fruit: tierName(ev.tier), points: ev.points, score: s.score }));
       if (ev.tier >= 8) unlock('merge-master');
       if (run.mode === 'learn' && run.tutorial.step === 1) {
         run.tutorial.step = 2; updateObjective();
@@ -850,12 +861,12 @@ function drainEvents() {
       }
     } else if (ev.kind === 'warn') {
       audio.warn(); $('warn-banner').classList.remove('hidden');
-      announce('Warning: fruit is above the line!');
+      announce(T('Warning: fruit is above the line!'));
     } else if (ev.kind === 'warn-clear') {
       $('warn-banner').classList.add('hidden');
     } else if (ev.kind === 'invalid') {
       audio.invalid();
-      announce(`Invalid action: ${ev.reason}.`);
+      announce(T('Invalid action: {reason}.', { reason: ev.reason }));
     } else if (ev.kind === 'gameover') {
       onGameOver(ev.reason);
     }
@@ -916,20 +927,20 @@ function updateObjective() {
   let text = '';
   if (run.mode === 'learn') {
     const steps = [
-      'Step 1/3: drop a fruit (aim, then Drop / Space).',
-      'Step 2/3: make a merge — drop a matching tier onto its twin.',
-      'Step 3/3: keep fruit below the glowing warning line. Free play!',
+      N('Step 1/3: drop a fruit (aim, then Drop / Space).'),
+      N('Step 2/3: make a merge — drop a matching tier onto its twin.'),
+      N('Step 3/3: keep fruit below the glowing warning line. Free play!'),
     ];
-    text = steps[Math.min(run.tutorial.step, 2)];
+    text = T(steps[Math.min(run.tutorial.step, 2)]);
   } else if (run.mode === 'journey') {
     const g = run.modeOpts.goals;
-    text = `Stage ${run.modeOpts.stageI + 1}: score ${g.targetScore}, reach ${TIER_NAMES[g.requireTier]}, within ${g.maxDrops} drops.`;
+    text = T('Stage {n}: score {score}, reach {fruit}, within {drops} drops.', { n: run.modeOpts.stageI + 1, score: g.targetScore, fruit: tierName(g.requireTier), drops: g.maxDrops });
   } else if (run.mode === 'daily') {
-    text = `Daily ${utcDateStr()} — one ranked run.`;
+    text = T('Daily {date} — one ranked run.', { date: utcDateStr() });
   } else if (run.mode === 'challenge') {
-    text = run.modeOpts.desc;
+    text = T(run.modeOpts.desc);
   } else {
-    text = 'Practice — relaxed play, undo enabled, not ranked.';
+    text = T('Practice — relaxed play, undo enabled, not ranked.');
   }
   $('objective').textContent = text;
   $('objective-top').textContent = text;
@@ -941,19 +952,19 @@ function updateHUD(force) {
   if (!s) return;
   $('score-big').textContent = s.score;
   $('score-top').textContent = s.score;
-  const nowTxt = `${TIER_NAMES[s.currentTier]} (${s.currentTier})`;
-  const nextTxt = `${TIER_NAMES[s.nextTier]} (${s.nextTier})`;
+  const nowTxt = `${tierName(s.currentTier)} (${s.currentTier})`;
+  const nextTxt = `${tierName(s.nextTier)} (${s.nextTier})`;
   $('now-fruit').textContent = nowTxt;
-  $('now-top').textContent = `Now: ${nowTxt}`;
+  $('now-top').textContent = T('Now: {fruit}', { fruit: nowTxt });
   $('next-fruit').textContent = nextTxt;
-  $('next-top').textContent = `Next: ${nextTxt}`;
+  $('next-top').textContent = T('Next: {fruit}', { fruit: nextTxt });
   // board list (navigable text equivalent)
   const sig = s.fruits.map(f => f.id + ':' + f.tier).join(',');
   if (force || sig !== lastBoardSig) {
     lastBoardSig = sig;
     const sorted = s.fruits.slice().sort((a, b) => b.tier - a.tier || a.id - b.id);
     $('board-list').innerHTML = sorted.map(f =>
-      `<li>${TIER_NAMES[f.tier]} (tier ${f.tier}) at x ${f.x.toFixed(1)}, y ${f.y.toFixed(1)}</li>`).join('') || '<li>Empty</li>';
+      `<li>${T('{fruit} (tier {tier}) at x {x}, y {y}', { fruit: tierName(f.tier), tier: f.tier, x: f.x.toFixed(1), y: f.y.toFixed(1) })}</li>`).join('') || `<li>${T('Empty')}</li>`;
   }
   const legal = R.legalActions(s);
   $('btn-drop').disabled = $('tt-drop').disabled = !legal.drop || run.phase !== 'active';
@@ -961,9 +972,10 @@ function updateHUD(force) {
 }
 
 // ---- setup screen builders ----
-function openSetup(mode) {
+function openSetup(mode, keepFocus) {
+  const prevDiff = $('practice-diff')?.value || 'normal';
   run.mode = mode;
-  $('setup-start').textContent = 'Start';
+  $('setup-start').textContent = T('Start');
   const body = $('setup-body');
   body.innerHTML = '';
   const h = $('setup-h');
@@ -972,12 +984,12 @@ function openSetup(mode) {
   let starter = null;
 
   if (mode === 'learn') {
-    h.textContent = 'Learn';
-    add(p('A 3-step interactive tutorial. About 2 minutes. Not ranked.'));
+    h.textContent = T('Learn');
+    add(p(T('A 3-step interactive tutorial. About 2 minutes. Not ranked.')));
     starter = () => newRun('learn', { seed: R.hashStr('learn'), difficulty: 'easy' });
   } else if (mode === 'journey') {
-    h.textContent = 'Journey';
-    add(p('40 staged goals. ~3–5 minutes each. Ranked per stage.'));
+    h.textContent = T('Journey');
+    add(p(T('40 staged goals. ~3–5 minutes each. Ranked per stage.')));
     const grid = document.createElement('div');
     grid.className = 'grid'; grid.setAttribute('role', 'list');
     for (let i = 0; i < 40; i++) {
@@ -987,42 +999,43 @@ function openSetup(mode) {
       b.textContent = (i + 1) + (save.journey.cleared[i] != null ? ' ★' : '');
       b.className = unlocked ? '' : 'locked';
       b.disabled = !unlocked;
-      b.title = `Stage ${i + 1}: score ${st.goals.targetScore}, tier ${st.goals.requireTier}, ${st.goals.maxDrops} drops`;
+      b.title = T('Stage {n}: score {score}, tier {tier}, {drops} drops', { n: i + 1, score: st.goals.targetScore, tier: st.goals.requireTier, drops: st.goals.maxDrops });
       b.onclick = () => newRun('journey', { seed: st.seed, difficulty: st.difficulty, goals: st.goals, stageI: i, ranked: true });
       grid.appendChild(b);
     }
     add(grid);
     $('setup-start').classList.add('hidden');
   } else if (mode === 'daily') {
-    h.textContent = 'Daily';
+    h.textContent = T('Daily');
     const d = utcDateStr();
     const done = save.daily[d];
-    add(p(`Seed from UTC date <strong>${d}</strong>. One ranked run per day; ~4 minutes.`));
-    add(p(done ? `Best today: <strong>${done.score}</strong>` : 'Not attempted yet today.'));
+    add(p(T('Seed from UTC date <strong>{date}</strong>. One ranked run per day; ~4 minutes.', { date: d })));
+    add(p(done ? T('Best today: <strong>{score}</strong>', { score: done.score }) : T('Not attempted yet today.')));
     // one ranked run per day: a repeat attempt is a replay, and must not submit
     starter = () => newRun('daily', { seed: R.hashStr('orchard-daily-' + d), difficulty: 'normal', ranked: !done });
-    $('setup-start').textContent = done ? 'Replay (unranked)' : 'Start';
+    $('setup-start').textContent = done ? T('Replay (unranked)') : T('Start');
   } else if (mode === 'practice') {
-    h.textContent = 'Practice';
-    add(p('Free play with undo. Not ranked. Restart anytime.'));
+    h.textContent = T('Practice');
+    add(p(T('Free play with undo. Not ranked. Restart anytime.')));
     const sel = document.createElement('select');
-    sel.id = 'practice-diff'; sel.setAttribute('aria-label', 'Difficulty');
-    sel.innerHTML = '<option value="easy">Easy</option><option value="normal" selected>Normal</option><option value="hard">Hard</option>';
+    sel.id = 'practice-diff'; sel.setAttribute('aria-label', T('Difficulty'));
+    sel.innerHTML = `<option value="easy">${T('Easy')}</option><option value="normal">${T('Normal')}</option><option value="hard">${T('Hard')}</option>`;
+    sel.value = prevDiff;
     add(sel);
     starter = () => newRun('practice', { seed: (Math.random() * 2 ** 32) >>> 0, difficulty: sel.value });
   } else if (mode === 'challenge') {
-    h.textContent = 'Challenge';
-    add(p('Preset rule variants. Ranked locally.'));
+    h.textContent = T('Challenge');
+    add(p(T('Preset rule variants. Ranked locally.')));
     for (const c of CHALLENGES) {
       const b = document.createElement('button');
-      b.innerHTML = `<strong>${c.name}</strong> — ${c.desc}`;
+      b.innerHTML = `<strong>${T(c.name)}</strong> — ${T(c.desc)}`;
       b.style.textAlign = 'left';
       b.onclick = () => newRun('challenge', { seed: R.hashStr('challenge-' + c.id), difficulty: c.difficulty, goals: c.goals, desc: c.desc, ranked: true });
       body.appendChild(b);
     }
     $('setup-start').classList.add('hidden');
   } else if (mode === 'scores') {
-    h.textContent = 'Score chase';
+    h.textContent = T('Score chase');
     renderLeaderboard(body);
     $('setup-start').classList.add('hidden');
   }
@@ -1031,7 +1044,7 @@ function openSetup(mode) {
     $('setup-start').onclick = starter;
   }
   run.phase = 'setup';
-  showScreen('scr-setup');
+  if (!keepFocus) showScreen('scr-setup');
 }
 
 function addBoard(body, title, headers, rows) {
@@ -1058,69 +1071,86 @@ async function renderRemoteBoards(body) {
   if (platform.hosted) {
     const rows = await platform.fetchLeaderboard();
     if (rows && rows.length) {
-      addBoard(body, 'Global board', ['#', 'Player', 'Score'],
+      addBoard(body, T('Global board'), ['#', T('Player'), T('Score')],
         rows.map(r => [r.rank, r.name, r.score]));
     }
   }
 }
 
+const MODE_NAMES = { learn: N('Learn'), journey: N('Journey'), daily: N('Daily'), practice: N('Practice'), challenge: N('Challenge') };
+const DIFF_NAMES = { easy: N('Easy'), normal: N('Normal'), hard: N('Hard') };
+
 function renderLeaderboard(body) {
   const p = document.createElement('p');
-  p.textContent = 'Local best runs (top 50 across modes). Replay data stored with each entry.';
+  p.textContent = T('Local best runs (top 50 across modes). Replay data stored with each entry.');
   body.appendChild(p);
   const t = document.createElement('table');
-  t.innerHTML = '<thead><tr><th>#</th><th>Mode</th><th>Score</th><th>Difficulty</th><th>Hash</th><th>Date</th></tr></thead>';
+  t.innerHTML = `<thead><tr><th>#</th><th>${T('Mode')}</th><th>${T('Score')}</th><th>${T('Difficulty')}</th><th>${T('Hash')}</th><th>${T('Date')}</th></tr></thead>`;
   const tb = document.createElement('tbody');
   save.leaderboard.slice(0, 20).forEach((e, i) => {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${i + 1}</td><td>${e.mode}</td><td>${e.score}</td><td>${e.difficulty}</td>
+    tr.innerHTML = `<td>${i + 1}</td><td>${T(MODE_NAMES[e.mode] || e.mode)}</td><td>${e.score}</td><td>${T(DIFF_NAMES[e.difficulty] || e.difficulty)}</td>
       <td><code>${e.hash.toString(16)}</code></td><td>${e.date.slice(0, 10)}</td>`;
     tb.appendChild(tr);
   });
-  if (!save.leaderboard.length) tb.innerHTML = '<tr><td colspan="6" class="muted">No ranked runs yet.</td></tr>';
+  if (!save.leaderboard.length) tb.innerHTML = `<tr><td colspan="6" class="muted">${T('No ranked runs yet.')}</td></tr>`;
   t.appendChild(tb);
   body.appendChild(t);
   renderRemoteBoards(body);
 }
 
 // Signed in, ranked runs only: post the total and show the board rank.
+let lbResult = null;   // { posted, rank } once the post resolved (re-rendered on language change)
+function renderLbLine() {
+  const r = lbResult;
+  $('res-lb').textContent = !r ? gt('sh_lbPosting') : !r.posted ? gt('sh_lbNotPosted')
+    : r.rank ? gt('sh_lbRank').replace('{rank}', r.rank) : gt('sh_lbPosted');
+}
 function postToLeaderboard(total) {
   const line = $('res-lb');
   if (!run.ranked || !platform.hosted) { line.classList.add('hidden'); return; }
   const mine = run.state;
   line.classList.remove('hidden');
-  line.textContent = gt('sh_lbPosting');
+  lbResult = null;
+  renderLbLine();
   platform.submitScore(total).then((r) => {
     if (run.state !== mine) return;
-    line.textContent = !r.posted ? gt('sh_lbNotPosted')
-      : r.rank ? gt('sh_lbRank').replace('{rank}', r.rank) : gt('sh_lbPosted');
+    lbResult = r;
+    renderLbLine();
   });
 }
 
-function showResults(reason, bd) {
-  const heads = { overflow: 'Crate overflowed!', 'goal-complete': 'Goal complete! 🎉',
-    'move-limit': 'Out of moves!', resigned: 'Run resigned' };
-  $('res-h').textContent = heads[reason] || 'Run over';
+let lastResults = null;   // { reason, bd } for re-rendering on language change
+function renderResults(reason, bd) {
+  const heads = { overflow: N('Crate overflowed!'), 'goal-complete': N('Goal complete! 🎉'),
+    'move-limit': N('Out of moves!'), resigned: N('Run resigned') };
+  $('res-h').textContent = T(heads[reason] || N('Run over'));
   $('res-breakdown').innerHTML = `<table>
-    <tr><td>Merge score</td><td>${bd.mergeScore}</td></tr>
-    <tr><td>Max tier bonus</td><td>${bd.maxTierBonus}</td></tr>
-    <tr><td><strong>Total</strong></td><td><strong>${bd.total}</strong></td></tr>
-    <tr><td>Drops</td><td>${bd.drops}</td></tr>
-    <tr><td>Merges</td><td>${bd.merges}</td></tr>
-    <tr><td>Max tier</td><td>${bd.maxTier} (${TIER_NAMES[bd.maxTier] || '—'})</td></tr>
-    <tr><td>Invalid actions</td><td>${bd.invalidActions}</td></tr>
-    <tr><td>Ticks</td><td>${bd.ticks}</td></tr>
-    <tr><td>Final hash</td><td><code>${run.lastHash.toString(16)}</code></td></tr>
+    <tr><td>${T('Merge score')}</td><td>${bd.mergeScore}</td></tr>
+    <tr><td>${T('Max tier bonus')}</td><td>${bd.maxTierBonus}</td></tr>
+    <tr><td><strong>${T('Total')}</strong></td><td><strong>${bd.total}</strong></td></tr>
+    <tr><td>${T('Drops')}</td><td>${bd.drops}</td></tr>
+    <tr><td>${T('Merges')}</td><td>${bd.merges}</td></tr>
+    <tr><td>${T('Max tier')}</td><td>${bd.maxTier} (${tierName(bd.maxTier)})</td></tr>
+    <tr><td>${T('Invalid actions')}</td><td>${bd.invalidActions}</td></tr>
+    <tr><td>${T('Ticks')}</td><td>${bd.ticks}</td></tr>
+    <tr><td>${T('Final hash')}</td><td><code>${run.lastHash.toString(16)}</code></td></tr>
   </table>`;
   const totalAch = Object.keys(ACHIEVEMENTS).length;
   const got = Object.keys(save.achievements).length;
-  const fresh = (run.newAchievements || []).map(k => `<li>🏅 ${ACHIEVEMENTS[k]}</li>`).join('');
+  const fresh = (run.newAchievements || []).map(k => `<li>🏅 ${T(ACHIEVEMENTS[k])}</li>`).join('');
   $('res-achievements').innerHTML =
-    `<p class="small muted">Achievements: ${got}/${totalAch} unlocked.</p>` +
+    `<p class="small muted">${T('Achievements: {got}/{total} unlocked.', { got, total: totalAch })}</p>` +
     (fresh ? `<ul class="small">${fresh}</ul>` : '');
+  if (!$('res-lb').classList.contains('hidden')) renderLbLine();
+}
+
+function showResults(reason, bd) {
+  lastResults = { reason, bd };
+  renderResults(reason, bd);
   $('br-next').classList.toggle('hidden', !pendingNext);
   postToLeaderboard(bd.total);
-  announce(`${$('res-h').textContent} Final score ${bd.total}.`);
+  announce(T('{headline} Final score {score}.', { headline: $('res-h').textContent, score: bd.total }));
   showScreen('scr-results');
   $('hud').classList.add('hidden');
 }
@@ -1151,8 +1181,9 @@ function applySettings() {
 }
 
 // ---- settings: Graphics section (localized; see gfx.js / gfx-i18n.js) ----
-const gfxLocale = pickLocale(navigator.language);
-const gt = translator(gfxLocale);
+// The Graphics/StarHermit strings follow the game language (gfx-i18n.js tables).
+let gtCur = translator(getLang());
+const gt = (key, vars) => gtCur(key, vars);
 const GFX_CATS = Object.keys(CATEGORIES);
 const gfxOpt = (value, text) => { const o = document.createElement('option'); o.value = value; o.textContent = text; return o; };
 
@@ -1161,15 +1192,25 @@ function commitGfx() {
   persist();
 }
 
-function buildGfxPanel() {
-  const sec = $('gfx-section');
-  sec.lang = gfxLocale;
+// Static Graphics labels (re-run on language change; the shared Sound/Language/
+// Report sections that game-options.js mounts in this section are untouched).
+function labelGfxPanel() {
   $('gfx-h').textContent = gt('graphics');
   $('gfx-quality-label').textContent = gt('quality');
   $('gfx-scale-label').textContent = gt('scale');
   $('gfx-adaptive-label').textContent = gt('adaptive');
   $('gfx-fps-label').textContent = gt('fps');
   $('gfx-postfail').textContent = gt('postFailed');
+  for (const cat of GFX_CATS) {
+    const s = $('gfx-' + cat);
+    if (!s) continue;
+    s.previousElementSibling.textContent = gt('cat_' + cat);
+    for (const o of s.options) if (o.value !== 'preset') o.textContent = gt('t_' + o.value);
+  }
+}
+
+function buildGfxPanel() {
+  labelGfxPanel();
   const sel = $('set-quality');
   sel.innerHTML = '';
   for (const v of ['auto', ...PRESETS]) sel.appendChild(gfxOpt(v, v));
@@ -1260,15 +1301,21 @@ function leaveRun() {
   $('hud').classList.add('hidden');
   gotoTitle();
 }
+function renderAwayLine() {
+  const r = save.resume;
+  if (r) {
+    const mins = Math.floor(Math.max(0, now() - r.savedAt) / 60000);
+    $('away-line').textContent = mins === 1 ? T('While you were away: 1 minute since your last run.')
+      : T('While you were away: {n} minutes since your last run.', { n: mins });
+    $('away-line').classList.remove('hidden');
+  } else $('away-line').classList.add('hidden');
+}
+
 function gotoTitle() {
   pendingNext = null;
   const r = save.resume;
   $('bt-resume').classList.toggle('hidden', !r);
-  if (r) {
-    const mins = Math.floor(Math.max(0, now() - r.savedAt) / 60000);
-    $('away-line').textContent = `While you were away: ${mins} minute${mins === 1 ? '' : 's'} since your last run.`;
-    $('away-line').classList.remove('hidden');
-  } else $('away-line').classList.add('hidden');
+  renderAwayLine();
   updateProfileLine();
   run.phase = 'title';
   showScreen('scr-title');
@@ -1286,10 +1333,10 @@ function updateProfileLine() {
       img.className = 'avatar'; img.src = platform.avatar; img.alt = ''; img.width = 20; img.height = 20;
       el.appendChild(img);
     }
-    el.appendChild(document.createTextNode('Playing as ' + (platform.nickname || '…') + ' — ' +
-      (SYNC_LABELS[platform.syncState] || 'Signed in.')));
+    el.appendChild(document.createTextNode(T('Playing as {name} — {status}', {
+      name: platform.nickname || '…', status: SYNC_LABELS[platform.syncState] ? T(SYNC_LABELS[platform.syncState]) : T('Signed in.') })));
   } else {
-    el.textContent = 'Guest — progress is stored on this device.';
+    el.textContent = T('Guest — progress is stored on this device.');
   }
   // StarHermit account buttons: sign-in only where the platform offers it,
   // invite only when signed in.
@@ -1575,10 +1622,26 @@ syncServerTime();
 platform.hooks.onAuth = (a) => {
   if (!a.signedIn) toast(gt('sh_signedOut'));
 };
-for (const id of ['bt-sh-signin', 'bt-sh-invite']) {
-  $(id).lang = gfxLocale;
-  $(id).querySelector('span').textContent = gt(id === 'bt-sh-signin' ? 'sh_signIn' : 'sh_invite');
+function labelAccountButtons() {
+  for (const id of ['bt-sh-signin', 'bt-sh-invite']) {
+    $(id).querySelector('span').textContent = gt(id === 'bt-sh-signin' ? 'sh_signIn' : 'sh_invite');
+  }
 }
+labelAccountButtons();
+// Live language switching: data-i18n markup re-applies itself (i18n.js); text
+// built in code re-renders here without touching the run or the scene.
+onLanguage((locale) => {
+  gtCur = translator(locale);
+  reflectKeys();
+  labelAccountButtons();
+  labelGfxPanel();
+  updateGfxPanel();
+  updateProfileLine();
+  renderAwayLine();
+  if (run.state) { updateObjective(); updateHUD(true); }
+  if (run.phase === 'setup' && run.mode) openSetup(run.mode, true);
+  if (lastResults && !$('scr-results').classList.contains('hidden')) renderResults(lastResults.reason, lastResults.bd);
+});
 reflectKeys();
 platform.loadBindings(KEY_DEFAULTS).then(b => { keys = b; reflectKeys(); });
 if (hostedAtLaunch) {

@@ -28,6 +28,9 @@ export const platform = {
     this._inited = true;
     s.init();
     let was = this.hosted;
+    // A cloud write lost to another device (the SDK sends writes conditional on
+    // the version it last read): re-read the slot, merge, and save the result.
+    s.on('saveconflict', () => { this.resolveConflict(); });
     s.on('auth', (a) => {
       if (a.signedIn === was) return;   // renewals change nothing visible
       was = a.signedIn;
@@ -48,7 +51,7 @@ export const platform = {
   // ---- identity: profile nickname (fallback "Player " + id prefix) + avatar ----
   async fetchNickname(userId) {
     const p = this.hosted ? await sdk().profile(String(userId)) : null;
-    return p ? p.displayName : 'Player ' + String(userId).slice(0, 6);
+    return p ? p.displayName : (this.hooks.playerName ? this.hooks.playerName(String(userId).slice(0, 6)) : 'Player ' + String(userId).slice(0, 6));
   },
   async fetchProfile() {
     if (!this.hosted) return;
@@ -59,7 +62,8 @@ export const platform = {
   },
 
   // ---- cloud save: the `game:<slug>` slot. localStorage stays the offline
-  // cache; the cloud slot is a mirror and wins on load conflict. ----
+  // cache; the cloud slot is a mirror. A differing cloud copy is merged with the
+  // local one (main.js mergeSaves), never adopted wholesale. ----
   saveSignature(doc) { return JSON.stringify(doc.save); },
   // No push before the start-up load resolves: the doc is built from live local
   // state, so a debounced push or a hide/pagehide flush during the load would
@@ -103,10 +107,30 @@ export const platform = {
       }
       this._adopting = true;
       try { if (this.hooks.adoptRemote) this.hooks.adoptRemote(doc); } finally { this._adopting = false; }
-      this._lastSig = this.hooks.buildSaveDoc ? this.saveSignature(this.hooks.buildSaveDoc()) : null;
+      // The slot holds the remote doc; push the merge only if it differs.
+      this._lastSig = this.saveSignature(doc);
       this.setSync('synced');
+      await this.flushCloud();
     } catch {
       this.setSync('error');
+    }
+  },
+  async resolveConflict() {
+    if (!this.hosted || this._resolving) return;
+    this._resolving = true;
+    try {
+      while (this._pushing) await new Promise((r) => setTimeout(r, 50));
+      const doc = await sdk().loadJSON();   // also lifts the SDK's write block
+      if (doc && typeof doc === 'object' && doc.save && typeof doc.save === 'object' && doc.save.settings) {
+        this._adopting = true;
+        try { if (this.hooks.adoptRemote) this.hooks.adoptRemote(doc); } finally { this._adopting = false; }
+      }
+      this._lastSig = null;
+      if (!sdk().saveConflicted()) await this.flushCloud();
+    } catch {
+      this.setSync('error');
+    } finally {
+      this._resolving = false;
     }
   },
 
@@ -151,7 +175,7 @@ export const platform = {
         const e = items[i];
         rows.push({
           rank: e.rank != null ? e.rank : i + 1,
-          name: e.userId ? await this.fetchNickname(e.userId) : (e.username || 'Player'),
+          name: e.userId ? await this.fetchNickname(e.userId) : (e.username || (this.hooks.playerName ? this.hooks.playerName('') : 'Player')),
           score: e.score,
         });
       }
