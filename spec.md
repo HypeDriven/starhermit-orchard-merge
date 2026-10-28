@@ -1,11 +1,11 @@
 # Orchard Merge — Product and Game Specification
 
-**Document status:** design specification only; no implementation is included.  
+**Document status:** running specification of the game as built (StarHermit engine 1.19.1 port).  
 **Game index:** 19  
 **Genre:** Physics merge puzzle  
 **Players:** 1 player; optional asynchronous score comparison  
 **Targets:** desktop browsers, mobile browsers, landscape and portrait where practical  
-**Rendering direction:** Three.js-first presentation with a fully usable semantic HTML interface layer
+**Rendering direction:** a StarHermit engine script game (TypeScript on the host API, `starhermit:scene` for the three.js-style stall, `starhermit:ui` for every menu and the HUD), played natively by the StarHermit client and in browsers by the engine's web runtime.
 
 ## 1. Product vision
 
@@ -68,16 +68,16 @@ Every transition has one owner and an explicit reason. Backgrounding pauses solo
 2. **Secondary:** score/progress, remaining moves or time, opponent/party status where applicable.
 3. **Tertiary:** settings, social controls, cosmetics, help, and history.
 
-The Three.js canvas fills the game region but is never the only UI. Menus, text, forms, chat, settings, and assistive descriptions use semantic HTML over or beside the canvas. Maintain a single shared layout model so DOM labels align with projected Three.js targets.
+The 3D stall fills the window but is never the only UI: every menu, the HUD, the board list and the announcements are `starhermit:ui` widgets (screen readers and the browser's accessibility mirror see them).
 
 ### Responsive layouts
 
-- **Wide desktop (≥1024 CSS px):** centered playfield, objective/progression rail on the left, contextual actions and social/status rail on the right. Maximum line length is 70 characters.
-- **Compact desktop/tablet:** playfield remains central; secondary rails collapse into drawers. Pointer hover may preview but never be required.
-- **Portrait mobile:** top safe-area status bar, square or perspective-fit playfield, bottom thumb-zone action tray, and sheet-based secondary panels. Never place critical controls under browser chrome or display cutouts.
-- **Landscape mobile:** reserve a narrow status rail; preserve at least 44×44 CSS-pixel targets and 8-pixel separation. On short landscape screens (≤500 px tall) the thumb tray puts the aim slider and its buttons on a single row so the crate stays visible.
-- **Large screens (above 1600×1000):** `ui-scale.js` sets `--ui-scale` (`min(w/1600, h/1000)`, capped at 2.5); the HUD rails, every overlay screen, banners, the countdown, the toast and the frame-rate meter are CSS-`zoom`ed by it, while the full-stage 3D canvas stays unzoomed.
-- React to resize, orientation, device-pixel-ratio, safe-area insets, virtual keyboard, and visibility changes without losing input or restarting the round.
+Layouts are picked each frame from the window's logical size (`native/screens.ts`), as the browser build's media queries did:
+
+- **Desktop (≥ 1024 px wide):** the left rail holds the Objective and the Board list (scrolling past 160 px); the right rail the score, the current and next fruit, and the controls panel (aim slider, Drop, Undo, Hint, Skip, Pause with their key chips).
+- **Compact (< 1024 px):** a top bar with the score and the Now / Next / objective badges (wrapping), and the thumb tray at the bottom (Aim slider over Drop, Hint, Undo, Skip, Pause, wrapping, centred).
+- **Short landscape (≤ 500 px tall, wider than tall):** the tray is one row (Aim label, slider, buttons) so the crate stays visible.
+- Cards (title, setup, pause, results, settings, help) are centred, at most 640 px wide, and scroll when taller than the window (opening at their top). The runtime's interface size and larger text scale everything; the safe area is respected.
 
 ### Screens and overlays
 
@@ -91,27 +91,22 @@ The Three.js canvas fills the game region but is never the only UI. Menus, text,
 
 ### Input
 
-- Pointer/touch: raycast only against explicit interaction layers; use pointer capture for drags; cancel safely on lost capture.
-- Touch: distinguish tap, drag, and camera gesture by distance/time thresholds; never require multi-touch for core play.
-- Keyboard: directional navigation among legal targets, confirm, cancel, pause, undo/hint where valid, and camera reset.
-- Gamepad: focus navigation, primary/secondary actions, pause, and remappable axes/buttons.
-- Prevent accidental double commits with action identifiers, not arbitrary long debounce timers. Provide visible drag origin, target preview, and invalid-action explanation.
+- **Keyboard** (`control.*` in `starhermit.txt`, rebindable in the runtime's Options › Controls): ←/A and →/D aim (0.5 units a press; held keys repeat after 0.4 s every 3 steps), Space/Enter/Numpad Enter drop, U undo (practice), H hint, R restart, P/Escape pause and resume. While a widget has key focus (Tab), Space/Enter press it and the arrows move the slider; a click or tap on a HUD button hands the keys back to the game.
+- **Gamepad** (`engine.gamepad.*`, new in the port): D-pad or left stick aims, South drops, North undoes, West hints, Select restarts, Start or East pauses.
+- **Pointer and touch:** a press on the stall (not on a widget) aims at the pointer's x on the fruit plane (the camera's ray through the press meets z = 0), a drag follows it, the release drops there. The aim slider and every action's button do the same as the keys. Presses are queued and decided after the frame's UI is built, so a press on a widget is the widget's.
+- Drops during the cooldown are refused (an invalid-action sound and announcement), as before.
 
 ### Accessibility
 
-- Full keyboard operation and visible focus; DOM equivalents for canvas controls; headings and live regions for objective, turn, score, errors, and results.
-- Color is reinforced by shape, texture, icon, or label. Include contrast-safe and common color-vision palettes.
-- Reduced-motion mode removes camera swoops, shake, parallax, rapid particles, and large scaling while preserving event timing.
-- Independent sliders for music, effects, ambience, and voice; captions/text cues for meaningful audio; no audio-only gameplay.
-- Options for larger text, high contrast, left-handed controls, hold-versus-toggle, timing assistance, haptics off, and tutorial replay.
-- Announce Three.js board state through a concise navigable model rather than describing every decorative object.
+- Full keyboard operation with visible focus rings; every control is a real UI widget; the Board list is the navigable text equivalent of the crate (fruit by tier with positions); merges, warnings, hints, resumes, achievements and results are announced (`ui.announce`).
+- Colour is reinforced by the leaf count (= tier) and the tier number in every label; five palettes including Deuteranopia-safe (Settings › Color palette).
+- The runtime's Options own sound volumes and mute, reduced motion (stops the pop-in, bursts, shake, hint bob, drifting clouds and motes), high contrast (the game swaps to the browser build's high-contrast colours), larger text and interface size. Settings › Haptics turns merge/result vibration off.
 
 ### Localization
 
-- Every player-facing string ships in en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR and it-IT: title, setup, pause, results, settings and help screens, HUD (objective, now/next fruit, board list), fruit names, challenge and achievement text, warnings, toasts and live-region announcements. `src/i18n.js` looks strings up by their US-English text in `src/locales/*.js` (es-ES and fr-CA list only their differences from es-419 and fr-FR, en-GB only its spelling changes); static markup carries `data-i18n` / `data-i18n-aria` / `data-i18n-title`, and the two rich-text help paragraphs use `data-i18n-html` keyed by their authored markup. The Graphics panel and sign-in/invite/leaderboard strings keep their tables in `src/gfx-i18n.js` and follow the same locale. The game name, seeds, hashes and key caps stay as-is.
-- Settings → **Language → Game language** (rendered by the shared `game-options.js` inside the Graphics section, reachable from the title and the pause menu) offers **Automatic — <resolved language>** plus the nine locales by native name, with a status line (Saved to account / Saved on this device / Account sync unavailable). A change applies immediately: `<html lang>` updates, markup re-renders, and the objective, HUD, board list, profile line, open setup or results screen, key captions and Graphics labels re-render in place without restarting the run or rebuilding the scene.
-- Resolution (`sh-language.js`): explicit game choice → for Automatic, the StarHermit account's `preferredLanguage` (`GET /api/v1/me/language`, signed in only) → `navigator.languages` → `en-US`. Tags map to the nearest shipped locale (`es-MX → es-419`, `en-AU → en-GB`, `fr → fr-FR`, `pt-PT → pt-BR`). The choice (`auto` or a locale) is stored per player in `localStorage['orchard-merge.language.<user|guest>']` and, when signed in, in the per-player settings key `ui.language` as `{ choice }`; a failed settings read never overwrites it and the game never writes the platform preference. Standalone play makes no language request. `?lang=<tag>` forces a locale for the page load (QA links) and hides the selector.
-- `tests/i18n.test.mjs` checks that every key used in markup and code (`tests/i18n-keys.mjs`) exists in all nine locales with the same placeholders and inline markup.
+- Every player-facing string ships in en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR and it-IT. `src/i18n.js` looks strings up by their US-English text in `src/locales/*.js` (es-ES and fr-CA list only their differences, en-GB only its spelling changes); the account strings (sign-in, invite, toasts, the leaderboard line) are `src/sh-strings.js`. The two rich help paragraphs keep their old keys (with `<strong>` and key-chip markup), drawn as plain text with the effective keys filled in.
+- The language is the runtime's interface language (`preferences().language`: Options › Language, else the account's preferred language, else the device's), mapped to the nearest shipped locale (`native/i18n.ts`); a change shows on the next frame. The browser build's own Language setting (`sh-language.js`, `ui.language`) is replaced by the runtime's.
+- `tests/i18n.test.mjs` checks every `T()`/`N()` key in `src/` and `native/` exists in all nine locales with the same placeholders and markup, that no locale carries unused keys, and the account strings.
 
 ## 4. Visual and audio design
 
@@ -136,47 +131,27 @@ The subject is the active playfield at near-tabletop to room scale, framed so st
 - Decorative motion is paused or reduced when hidden. Gameplay animation derives from simulation state and interpolation alpha, not frame count.
 - Camera shake is low-amplitude, event-tiered, disabled by reduced motion, and never changes raycast truth.
 
-### Graphics-skill routing
-
-During implementation, begin with `threejs-skill-router` and load only the following retained skills because they materially affect this visual target:
-
-- `threejs-camera-direction` for deliberate framing and input-safe camera transitions
-- `threejs-procedural-geometry` for authored, inspectable meshes instead of primitive-only placeholders
-- `threejs-procedural-materials` for coherent PBR surfaces, perceptual parameters, and readable state masks
-- `threejs-procedural-animation` for deterministic motion phases, springs, and interruption-safe transitions
-- `threejs-procedural-vfx` for bounded particles, trails, impact accents, and event hierarchy
-- `threejs-exposure-color-grading` for tone mapping, adaptation limits, and accessible color separation
-- `threejs-image-pipeline` for explicit depth/color ownership and pass ordering
-- `threejs-visual-validation` for fixed-view captures, seed sweeps, and performance evidence
-
-Follow the skill pack's acceptance gate: deterministic seeds, debug views for controlling fields, perceptually grouped parameters, mechanism-backed quality tiers, and a readable no-post baseline. Do not add an effect merely because a skill exists.
-
 ### Graphics
 
-**Graphics.** The scene is a sunny market stall: a plank table on legs over textured grass, four posts, a cream back cloth behind the crate (a light, even backdrop for every fruit colour), a red-and-cream striped awning with a scalloped valance, and a distant instanced orchard (trees hung with fruit) on rolling hills under a painted sky whose clouds drift. The crate has a wooden floor and corner frame with faint glass panes and no front pane. Lighting uses ACES filmic tone mapping with sRGB output, a warm key sun whose PCF shadow frustum is fitted to the stall, a sky/grass hemisphere fill and optional `RoomEnvironment` image-based lighting. Fruit keep their palette colours at every quality; on the detailed tier they use physical materials with per-fruit gloss (clearcoat, velvety sheen on the peach, dimpled micro-relief, shallow pumpkin ribs) and pointed leaves (the leaf count still equals the tier). The drop preview shows the actual next fruit. Optional effects: GTAO ambient occlusion, bloom limited to emissive accents (the hot warning line, merge ring flashes; threshold 0.92), a colour grade with vignette, FXAA/SMAA/MSAA, tier-coloured juice bursts with a ring flash, a short pop-in for newly merged fruit, pollen motes and drifting clouds; decorative motion stops with the Reduced motion setting or `prefers-reduced-motion`. Settings → **Graphics** offers a quality preset (Auto, chosen from the StarHermit hardware level below; Low; Balanced; High; Ultra), a render scale (50–200% of the preset's), one override per category (shadows off/low/medium/high, ambient occlusion off/on/high, bloom, colour grade, anti-aliasing off/FXAA/SMAA/MSAA, reflections, scenery detail plain/detailed, merge particles off/low/high, background motion static/animated; each defaults to "From preset (…)", and choosing a preset clears overrides), adaptive resolution (averages 90 frames and steps down to 60% when frames are slow, back up when fast), a frame-rate readout (bottom-left, never over controls), and a summary line "GPU · Level N · cost · W×H px" ("Level" localized). Pixel ratio is min(device ratio, preset cap: Low 1, Balanced 1.5, High/Ultra 2) × preset scale × render scale × adaptive scale; Low renders without a composer. Changes apply immediately and are saved with the other settings (`settings.gfx` in the save and cloud save; the old low/med/high `quality` value migrates to Low/Auto/High). The panel's strings are localized (en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR, it-IT) and follow the game language. If post-processing cannot be built, the game renders without it and the panel says so. Each fruit's leaf ring is one pre-merged mesh per tier (same leaves and count), so a fruit costs four draw calls on every preset. The overlay screens' frosted backdrop blur is drawn only on High and Ultra (`body.gfx-hud-blur`); below that the same translucent tint shows without it.
+The scene (`native/render.ts`, ported from the browser build's three.js r182 code to `starhermit:scene` with the same geometry, materials and constants) is a sunny market stall: a plank table on legs over textured grass, four posts, a cream back cloth, a red-and-cream striped awning with a scalloped valance, and a distant instanced orchard (trees hung with fruit) on rolling hills under a painted sky whose clouds drift. The crate has a wooden floor and corner frame with faint glass panes and no front pane. ACES filmic tone mapping (exposure 1.05), a warm key sun with PCF shadows reaching past the stall, a sky/grass hemisphere fill and `RoomEnvironment` reflections (environment intensity 0.22); light intensities are r182's ÷ π. Fruit keep their palette colours at every quality: a sphere, a stem, as many leaves as the tier (pointed leaves on detailed looks) and an emissive ring; on High and Ultra glossy physical skins (clear coat, micro-relief, shallow pumpkin ribs). The drop preview shows the actual next fruit under a guide line; the hint marker bobs over the hinted column for 2.5 s; the warning line glows past the bloom threshold while fruit is above it. Effects: GTAO, bloom (0.35 / 0.35 / threshold 0.92), the colour grade with vignette (linear, before the output), FXAA / SMAA / MSAA, tier-coloured juice bursts with a ring flash, the fruit pop-in, a small camera shake, pollen motes and drifting clouds.
 
-**Hardware-level detection.** `src/gpu-level.js` (shared StarHermit copy, `window.StarHermitGpu`, a classic script loaded before `src/main.js`, never edited here) rates the WebGL unmasked renderer plus device facts (`detectSystem()`: phone/tablet, cores, memory, screen) on the StarHermit hardware level 0–20 (0 = Galaxy S20 / Intel UHD or weaker, every software renderer and no WebGL; 20 = RTX 5090; each level ≈ 1.23×; laptop parts two levels below desktop; phones, tablets and ≤ 4 GB machines capped at 9). `src/gfx.js` maps it with `presetForLevel(level, { low: 0, balanced: 4, high: 10, ultra: 17 })`, so Auto picks Ultra on strong GPUs; adaptive resolution still steps down when slow. Headless SwiftShader is level 0 → Low. Phones and tablets pace Auto FPS at half the display refresh rate ("Auto (half refresh rate)") and start at 16 simultaneous sounds (shared `game-options.js`).
+The procedural canvas textures (wood, awning, valance, cloth, grass, skin relief, sky, the particle dot) are baked once by the browser build's own painters (`tools/bake-textures.mjs`, Chrome) into `assets/textures/*.png` at scale 1 and 2.
 
-**Per-preset budgets** (`BUDGETS` / `budgetFor` / `sparkCap` in `src/gfx.js`). Each preset holds 60 FPS on the weakest GPU Auto gives it — Low at level 0, Balanced 4, High 10, Ultra 17. Fruit sizes, physics, the crate, controls and rules are identical on every preset; only visuals change. Droplet and mote counts are tuned at the floor level and scale up within the preset on faster GPUs (`StarHermitGpu.scaleBudget`, ≤ 2×, at most 480 / 300).
+**Quality** follows the runtime's graphics level (Options › Graphics): `frame().quality` picks the browser build's preset row and budget (`native/quality.ts`), and the level within the tier scales droplets and motes (≤ 2×, at most 480 / 300). Render scale, the pixel-ratio cap, adaptive resolution, the frame-rate limit and readout and the GPU summary are the runtime's; the old per-category overrides are not offered.
 
 | Budget | Low | Balanced | High | Ultra |
 |---|---|---|---|---|
-| Stall and fruit shading | Lambert | Standard | glossy Physical skins (Detail on) | as High |
+| Shadows / AO / bloom / grade / AA | off / off / off / off / off | 1024 / off / on / on / FXAA | 2048 / on / on / on / SMAA | 4096 / high / on / on / MSAA |
+| Reflections, detailed scenery | no | yes | yes | yes |
+| Stall and fruit shading | Lambert | Standard | glossy Physical skins | as High |
 | Fruit sphere segments | 20×14 | 28×20 | 40×28 | 56×36 |
-| Fruit-skin micro-relief (bump + roughness) | no | no | yes | yes |
-| Procedural texture scale (wood, awning, cloth, grass, sky) | ½ | 1× | 1× | 2× |
-| Orchard trees / hanging fruit per tree (Detail on) | half / 2 | half / 3 | all / 6 | all / 8 |
-| Juice droplets at Particles high (low: 40 %) | 100 | 120 | 160 | 240 |
-| Pollen motes (Background animated) | 40 | 60 | 90 | 150 |
+| Fruit-skin micro-relief | no | no | yes | yes |
+| Baked texture scale | — | 1× | 1× | 2× |
+| Orchard trees / fruit per tree | — | half / 3 | all / 6 | all / 8 |
+| Juice droplets / pollen motes | none / static | 48 / 60 | 160 / 90 | 240 / 150 |
 | Bloom / GTAO resolution | ½ | ½ | ½ | full |
-| Frosted overlay blur | no | no | yes | yes |
 
-**Benchmark** (`node tools/gfx-bench.mjs orchard-merge`; hook `tests/gfx-bench.mjs` picks the preset in Settings → Graphics, starts a Practice run and keeps dropping fruit across the crate with the visible aim and Drop controls, retrying from the results). Measured 2026-10-17 (GPU ms above the draws-skipped floor, projected to the preset's floor level; CPU p90 on the RTX 5090 run):
-
-- Desktop 1920×1080: PASS low (typical 0.00 / slow 0.52 ms GPU, CPU 1.00 ms); PASS balanced (4.12 / 4.22, CPU 1.70); PASS high (3.70 / 4.23, CPU 2.40); PASS ultra (3.92 / 4.15, CPU 2.30).
-- Mobile 390×844 @3×: PASS low (0.07 / 0.02, CPU 1.00); PASS balanced (0.34 / 0.13, CPU 1.50).
-
-Graphics files: `src/gpu-level.js` (shared hardware-level module), `src/gfx.js` (pure quality model: presets, categories, `detectLevel`, `presetForLevel`, `detectPreset`, `BUDGETS`, `budgetFor`, `sparkCap`, `resolve`, `presetTier`, `describe`, `choosePreset`), `src/gfx-i18n.js` (panel strings and locale picking), `src/render-gfx.js` (procedural textures, orchard backdrop, motes, merge bursts, post chain), `dist/addons/` (three.js r182 post-processing, shader and `RoomEnvironment` addons, matching `dist/three.module.min.js`; mapped as `three/addons/` in the import map), `tests/gfx.test.js` (unit tests: hardware level → preset — SwiftShader/llvmpipe/no WebGL, AMD Radeon Graphics and Intel UHD → Low, Iris Xe → Balanced, GTX 1070 → High, RTX 4080/5090 → Ultra, phones such as Adreno 740 capped at Balanced — the per-preset budget table and the localized level label; the e2e suite drives the Graphics panel at desktop and mobile sizes and checks "Level 0" in the summary), `tests/gfx-bench.mjs` (hook for the platform's `tools/gfx-bench.mjs` GPU benchmark; dev-only).
+The old frosted (blurred) overlay backdrop on High/Ultra is not ported: the cards dim the stall with the same tint on every level. The peach's velvet sheen is left out (the engine draws no sheen).
 
 ### Performance budgets
 
@@ -190,18 +165,11 @@ Graphics files: `src/gpu-level.js` (shared hardware-level module), `src/gfx.js` 
 
 ### Client modules
 
-- `bootstrap`: host handshake, capability detection, asset manifest, lifecycle.
-- `rules`: pure deterministic state transitions, legality, scoring, seeded random stream.
-- `session`: local or hosted commands, snapshots, prediction policy, reconnect, replay.
-- `render`: Three.js scene graph, semantic entity views, camera, lighting, VFX, quality.
-- `ui`: responsive DOM shell, focus, localization, settings, overlays, accessibility mirror.
-- `audio`: buses, event mapping, focus/background behavior, decode and memory policy.
-- `content`: versioned levels, themes, tutorials, validation metadata.
-- `i18n` (`src/i18n.js`, `src/locales/`): string lookup, locale wiring through `sh-language.js` (an unmodified copy of the canonical StarHermit language helper), live re-render.
-- `save-merge` (`src/save-merge.js`): pure merge of two save documents (cloud vs this device).
-- `platform` (`src/platform.js`): adapter over the shared StarHermit SDK (`starhermit-sdk.js`, an unmodified copy of the canonical client loaded as `window.StarHermit`) The game makes no own-server `/api` or `/ws` requests, standalone or hosted.
-
-No module may mutate rules state except through a validated command. Rendering consumes immutable snapshots plus interpolation data. UI state and simulation state are separate so closing a drawer cannot affect a match.
+- `src/rules.js` — the deterministic rules (classic UMD script; loaded by the engine with `loadClassic`, by Node tests and `server.js` with `require`), unchanged.
+- `src/progress.js` — content and save model: palettes, fruit names, journey stages, challenges, achievements, the save document's reader, the browser build's cloud document reader, the game's options; `src/save-merge.js` — the merge of two saves.
+- `src/i18n.js`, `src/locales/`, `src/sh-strings.js` — strings.
+- `native/main.ts` — the entry: the run (60 Hz fixed steps, countdown, drops, undo, hints, fast-forward settling spread over frames, tutorial steps, results, achievements, journey and daily progress, local best runs with replays, leaderboard posting), navigation, input, lifecycle.
+- `native/screens.ts` — every screen and the HUD; `native/style.ts` + `assets/ui-style.json` (from `tools/ui-style.css`, `npm run css`) — the look; `native/render.ts` — the 3D stall; `native/quality.ts` — looks per level; `native/audio.ts` — sound; `native/platform.ts` — saves, options, the player, the clock, leaderboards; `native/rules.ts` — the typed facade over `src/rules.js`.
 
 ### Determinism, replay, and security
 
@@ -215,34 +183,30 @@ No module may mutate rules state except through a validated command. Rendering c
 
 - Show useful progress by asset group; load core rules/UI first and scenic assets lazily. Provide procedural low-detail substitutes if optional assets fail.
 - Cache immutable hashed assets and the last safe local snapshot. Updates activate between rounds, never during one.
-- Recover WebGL context by rebuilding GPU resources from retained CPU descriptors. If 3D is unavailable, present a clear compatibility message and preserve account/session state.
+- The runtime owns the GPU device and its recovery; a hidden window gets no frames (the run is saved first) and the simulation does not catch up.
 - Background tabs reduce rendering to zero or a low heartbeat while preserving required network lifecycle.
 
 ## 6. StarHermit integration
 
 ### Packaging and launch
-- The distribution ships `starhermit.txt` at its root (`name`, `description`, `launch=index.html`, `owner`, `server=score-script.js`, `cover`, and one `control.<action>=<codes> | <label>` line per keyboard action) and `starhermit-sdk.js`, loaded by `index.html` before `src/main.js`.
-- All platform traffic goes through the SDK; `src/platform.js` adapts it. `StarHermit.init()` reads `#game_token=` (library launch) or `#access_token=` (direct sign-in return) once and strips it; the slug is the `game_scope` claim. Without a token no platform request is made and guest play is unchanged.
-- The SDK renews the launch token before expiry. If renewal is refused the title line returns to guest, a "signed out — playing locally" toast shows, sign-in is re-offered and play continues on localStorage.
+- `starhermit.txt`: `launch=index.html` (the loader `npm run package` writes with `starhermit package --web .`, with `starhermit-files.json`), `engine.api=1`, `engine.entry=native/main.ts`, `engine.version=1.19.1`, `engine.minor=20`, capabilities `platform,storage,clipboard`, `server=score-script.js`, `control.*` and `engine.gamepad.*` per action. `.starhermitignore` leaves out tests, tools, `server.js`, docs and source art.
+- Signing in, the session and token renewal are the runtime's; a guest can sign in from the title (**Sign in with StarHermit**, `requestSignIn`). A session that ends shows the "signed out" toast; play continues on the device.
 
 ### Identity, preferences, and progress
-- **Sign-in:** on `*.starhermit.com` without a token the title shows **Sign in with StarHermit** (`StarHermit.signIn()`); hidden when signed in and when running locally.
-- **Identity:** the title's profile line shows the avatar and profile nickname (fallback `Player ` + id prefix) with the cloud-sync state.
-- **Cloud save:** the versioned, checksummed save document mirrors to the `game:<slug>` slot (2 s debounce, flush on `pagehide`/hidden tab) through `StarHermit.loadJSON` / `writeSave`, so every write after the start-up load is conditional on the version that load saw. On load a remote copy is merged with the local one (`mergeSaves`: journey unlock and per-stage best take the larger value, dailies keep the better score per day, ranked runs are unioned (top 50), achievements unioned with the earliest unlock, lifetime points the larger total; this device keeps its settings and its in-progress run, else the cloud's), and the merge is pushed back when it differs; with no remote save the local doc is pushed. Nothing is pushed or flushed until that load resolves. When another device saved first the SDK refuses the write and emits `saveconflict`: the game re-reads the slot, applies the same merge (without leaving a run in progress) and saves again. localStorage stays the offline cache.
-- **Settings KV:** volumes, mute, haptics, graphics, palette, reduced motion, high contrast and larger text are patched to the per-player settings store on change and applied after the cloud load at boot (the account value wins). Tutorial completion stays in the save document.
-- **Controls:** keyboard input routes by `KeyboardEvent.code` through `StarHermit.loadBindings()` (platform rebinds over the `control.*` defaults); Help → Controls shows the effective keys. Touch mappings remain on-screen controls.
-- **Invite:** signed in, the title shows **Invite a friend**, which copies `StarHermit.inviteLink()` to the clipboard and confirms with a toast.
-- Sign-in/invite labels and toasts are localized in all nine locales (`src/gfx-i18n.js` `sh_*`).
-- **Language:** Automatic follows the account's preferred language; an explicit choice syncs as `ui.language` (see Localization).
-- **Report a problem:** Settings → **Report a problem** (signed in only, from the shared `game-options.js`) files a bug report through `StarHermit.reportBug` with a small non-personal `context.json` (viewport, language, FPS cap, audio limit). Uncaught errors are filed as crash reports through `StarHermit.captureCrashes` (SDK-capped).
+- **Identity:** the title's profile line shows the player's display name with the cloud-sync state (saving / synced / unreachable), or "Guest — progress is stored on this device."
+- **Save:** the save (journey, dailies, ranked runs with replays, achievements, lifetime points, the tutorial flag and the run in progress) is the engine save (`starhermit:storage` `saves`, schema 1): written on the device at once and synced to the account by the runtime. A conflict with another device merges both (`mergeSaves`: nothing either side earned is dropped; this device keeps its run in progress, else the account's). A newer save arriving from the account is merged in.
+- **Migration:** the browser build's cloud document in the `game:<slug>` slot (`{ version: 1, savedAt, save }`) shows as foreign: it is read (`readForeign`), merged with this device's save and replaced once (`replaceForeign`); its palette and haptics settings become the game's options unless set since. Guests' old browser localStorage progress does not migrate.
+- **Options:** the game's own options (colour palette, haptics) are engine `settings` (`game.palette`, `game.haptics`, synced with the account). The browser build's per-player settings keys (`music`, `sfx`, `amb`, `mute`, `haptics`, `gfx`, `palette`, `reducedMotion`, `highContrast`, `largerText`, `ui.*`) are migrated where they still apply and then removed; sound, graphics, reduced motion, high contrast, larger text, language and key bindings are the runtime's Options (Settings › **Audio, graphics & accessibility** opens them, **Controls** opens rebinding).
+- **Invite:** signed in, **Invite a friend** copies the platform invite link (toast).
+- **Daily:** the date (UTC) comes from the platform's clock (`serverNow`) when it has answered, else the device's.
+- Report a problem and crash reports are the runtime's.
 
 ### Leaderboards and achievements
-- **Platform leaderboard:** signed in, every finished ranked run (Journey, the day's first Daily, Challenge) posts its total through `StarHermit.submitScores` — a practice session whose `score-script.js` (the `server=` platform script; canonical copy in the games repo's `tools/score-script.js`) range-checks it and posts it to the `high-score` board (integer, higher is better, 0–1,000,000). The results screen shows "Leaderboard rank: #N" (or posted / not posted), localized in the nine locales (`src/gfx-i18n.js` `sh_lb*`). Score chase shows the `high-score` board's entries with nickname-resolved rows. Learn, Practice and Daily replays post nothing; standalone play posts nothing and shows no leaderboard line.
-- **Local board:** ranked runs are also kept on the local board (top 50 with replay data). `server.js` is the local dev server; the client never calls its routes (`/api/v1/scores`, `/api/v1/time`); the device clock sets the daily boundary. Without a launch token the game makes no network request beyond its static files.
-- Achievements are local (part of the save document); no server declares platform achievements.
+- Results are server-authoritative: signed in, every finished ranked run (Journey stages, the day's first Daily, Challenges) posts its total through `score-script.js` (a practice session whose socket carries `{ type: 'result', scores: { 'high-score': total } }`; the script range-checks it and posts it to the `high-score` board, integer, higher is better, 0–1,000,000). The results show "Leaderboard rank: #N" (or posted / not posted). Score chase shows the local best runs and, signed in, the board's top 50. Learn, Practice and Daily replays post nothing; guests post nothing.
+- Achievements are local records in the save (shown on the results); no platform achievements.
 
 ### Not used
-- Sessions, matchmaking, friends picker, session chat, replays, realtime rooms and voice: the game is single-player; `score-script.js` only accepts score posts and `server.js` is a dev static/API server.
+- Matchmaking, rooms, friends, chat and voice: the game is single-player. `server.js` is the dev static/API server (not part of the package).
 
 ## 7. Content, economy, and retention
 
@@ -283,7 +247,9 @@ Success targets for the first public test: median first-play time under 20 secon
 
 - Test expired/rotated tokens, privacy settings, rate limits, offline start, reconnect at each game state, duplicate commands, out-of-order events, server restart, and version mismatch.
 - Verify achievement idempotency, leaderboard validation, friends-only filtering, cloud-save conflict handling, activity start/end pairing, and server-time countdown accuracy.
-- `tests/platform.test.mjs` covers the ETag-conditional cloud-save round trip, a 412 conflict that re-reads, merges and saves, `mergeSaves`, sign-in on a UUID host and zero requests standalone. The browser e2e ends with a language step against a stubbed StarHermit API: the account's preferred `fr-CA` makes Automatic resolve to French (Canada); switching to Deutsch mid-run re-renders settings, pause menu and HUD in place, PUTs `ui.language`, keeps the HUD buttons clear at 390 px, and Report a problem posts to `/reports`.
+- `npm test`: `tests/rules.test.js` (rules), `tests/server.test.js` (the dev server's replay validation), `tests/progress.test.mjs` (save reading, the browser build's cloud document, merging, options, content), `tests/i18n.test.mjs`, and `tests/native.mjs`: the web index is current, `tsc`, `starhermit check .` with no warnings, and every `tests/native/*.play` script as a signed-out render check driving the real UI (Journey stages 1–2 to their goals; a Daily to overflow, its replay offer and the Score chase table; Practice by keys and a mouse drag with undo, hint, skip, help, restart, leave and resume; the tutorial on a DPR-3 phone by taps and swipes with the settings card; the Move limit challenge on a DPR-3 landscape phone to its results).
+- `npm run test:browser` (`tools/browser-play.mjs`) plays the packaged web build in Chrome on the GPU at desktop, phone and landscape-phone sizes (Journey stage 1 to its goal, Practice with a mouse drag; the tutorial with finger swipes; the Move limit challenge to its results) and fails on console errors.
+- Signed-in paths (foreign save, legacy settings, score posting) are covered by unit tests of their logic; they cannot be live-tested here.
 - For hosted sessions, test disconnect/rejoin, abandonment, timeout, invitation expiry, result reconciliation, replay access, moderation controls, and authoritative cheat attempts.
 
 ## 10. Definition of done and non-goals
@@ -292,11 +258,9 @@ This specification is ready for implementation when rules examples, content sche
 
 This document does **not** authorize implementation, asset production, monetization work, native wrappers, real-money systems, or copying any existing product. The initial build should favor one excellent core loop and a coherent original visual identity over feature breadth.
 
-## Browser interference
+## Known limitations
 
-`browser-guard.js` (loaded from `index.html`) suppresses browser UI that gets in the way of play: the right-click context menu, the iOS long-press callout, copy / cut / paste, and page text selection. Text fields (inputs, textareas, selects, contenteditable) keep normal selection, context menu and clipboard behaviour.
-
-
-## Sound and frame-rate options
-
-The options panel includes Sound controls for master, music, effects and UI volume, a mute that preserves volume levels, and an Auto or manual concurrent-sound limit (1–64). Changes apply immediately with perceptual volume curves. A shared allocator bounds Web Audio and media playback, including loops and scheduled sources. Graphics includes Auto display refresh or a custom maximum frame rate from 1–1000 FPS; rendering is paced independently of simulation and input. Preferences persist locally, with FPS stored per detected GPU, and reconcile with Starhermit settings when signed in. The controls support keyboard and touch input and the supported English, Spanish, German, French, Portuguese and Italian locales.
+- Pre-existing rules behaviour kept for replay compatibility: dropping every fruit exactly at one x can build a perfectly balanced vertical column; it still overflows within a few dozen drops.
+- Pre-existing scoring quirk kept (replays and the dev server's validation depend on it): the results list a max-tier bonus that the total does not include (the total is the merge score).
+- Hosted multiplayer does not exist; the high-score post is the only server-script use.
+- Not ported: the frosted overlay blur, the peach's sheen, the WebGL-context-lost card (the runtime owns the device), the old synthesized sound fallbacks while samples decode, the separate ambience volume (the ambience plays on the music bus at the old 40 % level), the old graphics overrides and the old Language selector (the runtime's Options replace them).
