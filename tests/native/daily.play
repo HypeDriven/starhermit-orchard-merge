@@ -1,0 +1,36 @@
+# Desktop: the Daily from the title, dropped at the centre until the crate overflows (59 drops on 2026-10-28; any day's seed overflows within ~70), the results; the Daily then offers an unranked replay and the Score chase lists the run.
+# viewport 1366x768@1
+until 300 =▶ Play
+frames 150
+click =Daily
+until 60 One ranked run per day
+frames 10
+expect Not attempted yet today.
+click =Start
+until 300 =Drop
+frames 200
+repeat 6000 until Crate overflowed
+  key Space 1
+  frames 34
+end
+frames 30
+save daily-results
+expect Final hash
+click =Back to title
+until 60 =▶ Play
+frames 10
+click =Daily
+until 60 One ranked run per day
+frames 10
+expect Best today:
+expect Replay (unranked)
+click =Back
+until 60 =▶ Play
+frames 10
+click =Score chase
+until 60 Local best runs
+frames 10
+expect Daily
+save scores
+click =Back
+until 60 =▶ Play

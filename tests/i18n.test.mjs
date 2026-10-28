@@ -1,9 +1,9 @@
 // Every player-facing string exists in all nine locales (node --test).
-// Keys are the US-English source strings (see tests/i18n-keys.mjs).
+// Keys are the US-English source strings in src/ and native/ (see tests/i18n-keys.mjs).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DICTS, LOCALES, T, setLocale } from '../src/i18n.js';
-import { GFX_STRINGS, translator } from '../src/gfx-i18n.js';
+import { SH_STRINGS } from '../src/sh-strings.js';
 import { ALL } from './i18n-keys.mjs';
 
 const placeholders = (s) => [...String(s).matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join(',');
@@ -30,12 +30,13 @@ test('no locale carries keys that no longer exist', () => {
   }
 });
 
-test('Graphics and StarHermit strings exist in all nine locales', () => {
+test('the StarHermit account strings exist in all nine locales with the same placeholders', () => {
+  const keys = Object.keys(SH_STRINGS['en-US']);
   for (const locale of LOCALES) {
-    assert.ok(GFX_STRINGS[locale], locale);
-    assert.notEqual(translator(locale)('sh_signIn'), 'sh_signIn', locale);
+    assert.deepEqual(Object.keys(SH_STRINGS[locale] || {}), keys, locale);
+    for (const k of keys) assert.equal(placeholders(SH_STRINGS[locale][k]), placeholders(SH_STRINGS['en-US'][k]), `${locale} ${k}`);
   }
-  assert.notEqual(translator('de-DE')('graphics'), translator('en-US')('graphics'));
+  assert.notEqual(SH_STRINGS['de-DE'].signIn, SH_STRINGS['en-US'].signIn);
 });
 
 test('T falls back to the key and fills placeholders; regional variants inherit', () => {

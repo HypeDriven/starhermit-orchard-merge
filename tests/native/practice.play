@@ -1,0 +1,65 @@
+# Desktop: Practice on Hard by the keyboard and the mouse: aim keys, a drag on the crate that drops on release, undo, a hint, fast-forward, the pause card with Help, restart, Leave run; the title offers the run back and Resume continues it.
+# viewport 1366x768@1
+until 300 =▶ Play
+frames 150
+click =Practice
+until 60 Free play with undo
+frames 10
+click =Normal
+frames 10
+click =Hard
+frames 10
+click =Start
+until 300 =Drop
+frames 200
+key ArrowLeft 30
+frames 5
+key Space 1
+frames 40
+drag 50% 50% 60% 50% 10
+frames 40
+key ArrowRight 10
+frames 2
+key Space 1
+frames 40
+expect Undo
+key KeyU 1
+frames 10
+key KeyH 1
+frames 10
+save practice-hint
+click =Skip
+frames 60
+save practice-play
+key Escape 1
+until 60 =Paused
+frames 10
+click =Help
+until 60 How to play
+frames 10
+save practice-help
+click =Close
+until 60 =Paused
+frames 10
+click =Restart
+until 300 =Drop
+frames 150
+key Space 1
+frames 40
+key KeyP 1
+until 60 =Paused
+frames 10
+click =Leave run
+until 60 Resume last run
+frames 10
+save practice-title
+click =Resume last run
+until 60 =Drop
+frames 30
+key Space 1
+frames 40
+key Escape 1
+until 60 =Paused
+frames 10
+click =Leave run
+until 60 =▶ Play

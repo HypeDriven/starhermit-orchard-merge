@@ -1,0 +1,47 @@
+# Portrait phone (DPR 3): Play leads a first-timer to the tutorial; dropped by the tray's Drop and swipes on the crate (aim, drop on release) through its three steps; the settings card from the pause card (palette, haptics); Leave run.
+# viewport 390x844@3
+until 300 =▶ Play
+frames 150
+save phone-title
+touch =▶ Play
+until 60 A 3-step interactive tutorial
+frames 10
+touch =Start
+until 300 =Drop
+frames 200
+save phone-play
+repeat 4000 until Step 3/3
+  touch =Drop
+  frames 34
+end
+frames 5
+swipe 40% 50% 60% 50% 8
+frames 40
+swipe 60% 50% 30% 50% 8
+frames 40
+touch =Skip
+frames 30
+save phone-step3
+touch =Pause
+until 60 =Paused
+frames 10
+touch =Settings
+until 60 Color palette
+frames 10
+touch =Default
+frames 10
+touch =Citrus
+frames 10
+save phone-settings
+touch =Done
+until 60 =Paused
+frames 10
+touch =Resume
+frames 60
+save phone-citrus
+touch =Pause
+until 60 =Paused
+frames 10
+touch =Leave run
+until 60 Resume last run
+frames 10

@@ -1,0 +1,39 @@
+# Desktop: Journey stage 1 from the title, played by the keyboard (Space every 35 frames at the centre) to its goal; Next stage plays stage 2 to its goal; the stage grid shows both cleared.
+# viewport 1366x768@1
+until 300 =▶ Play
+frames 150
+click =Journey
+until 60 40 staged goals
+frames 10
+save journey
+click =1
+until 300 =Drop
+frames 200
+save journey-play
+repeat 4000 until Goal complete
+  key Space 1
+  frames 34
+end
+frames 30
+save journey-results
+expect Next stage
+expect Achievements: 1/5 unlocked.
+click =Next stage
+until 300 Stage 2: score 360
+frames 200
+repeat 4000 until Goal complete
+  key Space 1
+  frames 34
+end
+frames 30
+click =Back to title
+until 60 =▶ Play
+frames 10
+click =Journey
+until 60 40 staged goals
+frames 10
+expect 1 ★
+expect 2 ★
+save journey-done
+click =Back
+until 60 =▶ Play

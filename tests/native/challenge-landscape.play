@@ -1,0 +1,27 @@
+# Phone held sideways (DPR 3): the Move limit challenge by touch (the tray in one row), 25 drops to the results; Retry; Leave from the pause card.
+# viewport 844x390@3
+until 300 =▶ Play
+frames 150
+touch =Challenge
+until 60 Preset rule variants
+frames 10
+save land-challenge
+touch Move limit
+until 300 =Drop
+frames 200
+save land-play
+repeat 4000 until =Retry
+  touch =Drop
+  frames 34
+end
+frames 30
+save land-results
+expect Out of moves!
+touch =Retry
+until 300 =Drop
+frames 200
+touch =Pause
+until 60 =Paused
+frames 10
+touch =Leave run
+until 60 Resume last run
