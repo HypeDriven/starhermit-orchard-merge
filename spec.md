@@ -1,6 +1,6 @@
 # Orchard Merge — Product and Game Specification
 
-**Document status:** running specification of the game as built (StarHermit engine 1.22.0 port).  
+**Document status:** running specification of the game as built (StarHermit engine 1.23.0 port).  
 **Game index:** 19  
 **Genre:** Physics merge puzzle  
 **Players:** 1 player; optional asynchronous score comparison  
@@ -189,7 +189,7 @@ The old frosted (blurred) overlay backdrop on High/Ultra is not ported: the card
 ## 6. StarHermit integration
 
 ### Packaging and launch
-- `starhermit.txt`: `launch=index.html` (the loader `npm run package` writes with `starhermit package --web .`, with `starhermit-files.json`), `engine.api=1`, `engine.entry=native/main.ts`, `engine.version=1.22.0`, `engine.minor=20`, capabilities `platform,storage,clipboard`, `server=score-script.js`, `control.*` and `engine.gamepad.*` per action. `.starhermitignore` leaves out tests, tools, `server.js`, docs and source art.
+- `starhermit.txt`: `launch=index.html` (the loader `npm run package` writes with `starhermit package --web .`, with `starhermit-files.json`), `engine.api=1`, `engine.entry=native/main.ts`, `engine.version=1.23.0`, `engine.minor=20`, capabilities `platform,storage,clipboard`, `server=score-script.js`, `control.*` and `engine.gamepad.*` per action. `.starhermitignore` leaves out tests, tools, `server.js`, docs and source art.
 - Signing in, the session and token renewal are the runtime's; a guest can sign in from the title (**Sign in with StarHermit**, `requestSignIn`). A session that ends shows the "signed out" toast; play continues on the device.
 
 ### Identity, preferences, and progress
