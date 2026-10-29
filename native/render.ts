@@ -9,12 +9,12 @@
 // drifting clouds and pollen motes, the merge bursts (juice droplets and a
 // ring flash that blooms), the fruit pop-in and the camera shake.
 //
-// From three.js: light intensities are r182's ÷ π (the engine's convention);
+// From three.js r182 (engine.minor 26+): light intensities, normalBias and
+// the orthographic shadow box fitted around the stall as the page set them;
 // RoomEnvironment(renderer) + PMREM give the reflections at the old
 // environmentIntensity 0.22; the post chain (GTAO, UnrealBloom 0.35 / 0.35 /
 // 0.92, the GradeShader before the output, FXAA / SMAA / MSAA) is
-// renderer.ao / bloom / grade / antialias; the fitted orthographic shadow box
-// is the engine's `shadow.distance` along the view. The procedural canvas
+// renderer.ao / bloom / grade / antialias. The procedural canvas
 // textures are baked into assets/textures (tools/bake-textures.mjs). The
 // camera keeps the authored 3/4 direction and backs off until the crate,
 // the drop preview and the warning line fit the window, as fitCamera did.
@@ -23,7 +23,7 @@ import {
   ACESFilmicToneMapping, BoxGeometry, BufferAttribute, BufferGeometry, CircleGeometry, Color, ConeGeometry,
   CylinderGeometry, DirectionalLight, DoubleSide, Fog, Group, HemisphereLight, IcosahedronGeometry, InstancedMesh,
   Matrix4, Mesh, MeshBasicMaterial, MeshLambertMaterial, MeshPhysicalMaterial, MeshStandardMaterial,
-  NoColorSpace, Object3D, PerspectiveCamera, PlaneGeometry, PMREMGenerator, Points, PointsMaterial, Quaternion,
+  NoColorSpace, Object3D, OrthographicCamera, PerspectiveCamera, PlaneGeometry, PMREMGenerator, Points, PointsMaterial, Quaternion,
   RepeatWrapping, RingGeometry, RoomEnvironment, SRGBColorSpace, Shape, ShapeGeometry, SphereGeometry, TextureLoader,
   TorusGeometry, Vector3, mergeGeometries, renderer, scene,
   type Material, type Texture,
@@ -106,8 +106,6 @@ function fitCamera(): void {
   camBase.copy(CAM_DIR).multiplyScalar(camDist).add(CAM_TARGET);
   camera.position.copy(camBase);
   camera.lookAt(CAM_TARGET);
-  // fitShadowFrustum: the sun's shadows reach past the stall (a box around the table, crate and cloth).
-  if (dirLight) dirLight.shadow.distance = camDist + 30;
 }
 
 // ------------------------------------------------------------------ the scene
@@ -129,6 +127,27 @@ function disposeWorld(): void {
   ghostFruit = null;
   ghostTier = 0;
   fruitMeshes.clear();
+}
+
+/** fitShadowFrustum: the sun's orthographic shadow camera fitted tightly around the stall (table, crate, cloth). */
+function fitShadowFrustum(light: DirectionalLight): void {
+  const probe = new Object3D();
+  probe.position.copy(light.position);
+  probe.lookAt(light.target.position);
+  probe.updateMatrixWorld();
+  const inv = probe.matrixWorld.clone().invert();
+  const v = new Vector3();
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const x of [-9, WORLD_W + 9]) for (const y of [GROUND_Y, 39]) for (const z of [-10, 12]) {
+    v.set(x, y, z).applyMatrix4(inv);
+    minX = Math.min(minX, v.x); maxX = Math.max(maxX, v.x);
+    minY = Math.min(minY, v.y); maxY = Math.max(maxY, v.y);
+    minZ = Math.min(minZ, v.z); maxZ = Math.max(maxZ, v.z);
+  }
+  // Object3D.lookAt on a non-camera points +z at the target; the shadow camera looks down -z.
+  const cam = light.shadow.camera as OrthographicCamera;
+  Object.assign(cam, { left: -maxX, right: -minX, top: maxY, bottom: minY, near: Math.max(0.5, minZ - 5), far: maxZ + 5 });
+  cam.updateProjectionMatrix();
 }
 
 /** buildScene: the stall, crate, warning line, preview and markers, the orchard and the effects for a look and palette. */
@@ -158,14 +177,15 @@ function buildScene(): void {
   scene.environmentIntensity = 0.22;
 
   // Warm sun (key) with PCF shadows over the stall, plus a sky/grass hemisphere fill.
-  hemi = new HemisphereLight(0xfff3dc, 0x5f7d4c, (q.reflections ? 0.75 : 0.95) / PI);
+  hemi = new HemisphereLight(0xfff3dc, 0x5f7d4c, q.reflections ? 0.75 : 0.95);
   w.add(hemi);
-  dirLight = new DirectionalLight(0xffe4bd, 2.0 / PI);
+  dirLight = new DirectionalLight(0xffe4bd, 2.0);
   dirLight.position.copy(CAM_TARGET).add(new Vector3(15, 29, 30).normalize().multiplyScalar(70));
   dirLight.target.position.copy(CAM_TARGET);
   dirLight.shadow.bias = -0.0005;
-  dirLight.shadow.normalBias = 1.3; // three's 0.04 world units ≈ 1.3 texels of the old fitted box
+  dirLight.shadow.normalBias = 0.04;
   w.add(dirLight, dirLight.target);
+  fitShadowFrustum(dirLight);
   const shadows = q.shadows > 0;
   renderer.shadowMap.enabled = shadows;
   dirLight.castShadow = shadows;
