@@ -593,12 +593,15 @@ export function applyLook(next: Look, colors: (string | null)[]): void {
     denoise: { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: next.ao === "high" ? 6 : 4, rings: 2, samples: next.ao === "high" ? 16 : 8, radiusExponent: 2 },
   };
   // High threshold: only emissive accents (warning line, merge flashes) and hot highlights.
+  // The page's three r182 UnrealBloomPass strength, unchanged: minor 29 bloom follows r185 as the page did.
   renderer.bloom = next.bloom ? { strength: 0.35, radius: 0.35, threshold: 0.92, resolution: b.bloomRes } : null;
   // render-gfx.js GradeShader (linear light before the output): a gentle S-curve, a touch more saturation, warm
   // highlights / cool shadows, the 0.2 vignette.
   renderer.grade = next.grade ? {
     space: "linear", contrast: 0.18, saturation: 1.1, shadows: [0.97, 0.99, 1.04], highlights: [1.04, 1.01, 0.95], split: [0.2, 0.8],
     vignette: { amount: 0.2, inner: 0.4, outer: 0.9 },
+    levels: [0.98, 0.015], // s * 0.98 + 0.015
+    overRange: "keep", // minor 29: mix(c, s + max(c - 1, 0), amount) as the page's grade
   } : null;
   renderer.antialias = next.antialias;
   buildScene();
