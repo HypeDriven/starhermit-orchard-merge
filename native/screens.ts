@@ -83,24 +83,9 @@ function button(b: Btn, width: number | null = null): boolean {
 }
 /** Buttons at their own widths in rows that wrap at `width` (CSS flex-wrap). */
 function flow(label: string, list: Btn[], width: number, gap = 10, align: "start" | "center" = "start"): void {
-  const rows = wrapRows(list.map((b) => Math.min(width, btnW(b))), width, gap);
-  let k = 0;
-  ui.column(label, () => {
-    rows.forEach((n, ri) => ui.row(`${label}-r${ri}`, () => {
-      for (let i = 0; i < n; i++, k++) { const b = list[k]!; button(b, btnW(b) > width ? width : null); }
-    }, { spacing: gap, align: "center" }));
-  }, { spacing: gap, align, width });
-}
-function wrapRows(widths: number[], max: number, gap: number): number[] {
-  const rows: number[] = [];
-  let used = 0, n = 0;
-  for (const w of widths) {
-    if (n && used + gap + w > max) { rows.push(n); used = 0; n = 0; }
-    used += (n ? gap : 0) + w;
-    n++;
-  }
-  if (n) rows.push(n);
-  return rows;
+  ui.row(label, () => {
+    for (const b of list) button(b, btnW(b) > width ? width : null);
+  }, { wrap: true, width, gap, justify: align, align: "center" });
 }
 /** Text up to `width` wide: one label when it fits, else a paragraph. */
 function para(text: string, width: number, cls = "p", id?: string, center = false): void {
@@ -496,17 +481,14 @@ function topBar(L: Layout): void {
     ["objective-top", objectiveText(), "badge-text"],
   ];
   const widths = items.map(([, t, c], i) => Math.min(iw, tw(t, c) + (i ? 24 : 4)));
-  const rows = wrapRows(widths, iw, 8);
   ui.place("topbar", { anchor: "top-start", x: 6, y: 6 }, () => {
     const r = ui.style("topbar", { width: w }).id("topbar").column(T("Score"), () => {
-      let k = 0;
-      rows.forEach((n, ri) => ui.row(`top-r${ri}`, () => {
-        for (let i = 0; i < n; i++, k++) {
-          const [id, text, cls] = items[k]!;
-          if (k === 0) { ui.style(cls).id(id).label(text); continue; }
+      ui.row("top-row", () => {
+        items.forEach(([id, text, cls], k) => {
+          if (k === 0) { ui.style(cls).id(id).label(text); return; }
           ui.style("badge", { width: widths[k]! }).row(`${id}-b`, () => para(text, widths[k]! - 22, cls, id), { width: widths[k]! });
-        }
-      }, { spacing: 8, align: "center" }));
+        });
+      }, { wrap: true, width: iw, gap: { row: 6, column: 8 }, align: "center" });
     }, { width: w, spacing: 6 });
     lastSize.set("topbar", r.height / L.sc);
   });

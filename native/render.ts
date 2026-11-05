@@ -587,14 +587,14 @@ export function applyLook(next: Look, colors: (string | null)[]): void {
   sceneKey = key;
   look = next;
   palette = colors;
-  const b = next.budget;
-  renderer.ao = next.ao === "off" ? null : {
-    blendIntensity: 0.7, radius: 1.2, distanceExponent: 1.4, thickness: 1.5, scale: 1.0, samples: next.ao === "high" ? 16 : 8, resolution: b.aoRes,
-    denoise: { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: next.ao === "high" ? 6 : 4, rings: 2, samples: next.ao === "high" ? 16 : 8, radiusExponent: 2 },
+  const ao = next.ao, full = !!ao && ao.resolution >= 1; // the engine's AO: resolution 1 is its "high"
+  renderer.ao = ao && {
+    blendIntensity: 0.7, radius: 1.2, distanceExponent: 1.4, thickness: 1.5, scale: 1.0, samples: ao.samples, resolution: ao.resolution,
+    denoise: { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: full ? 6 : 4, rings: 2, samples: ao.denoiseSamples, radiusExponent: 2 },
   };
   // High threshold: only emissive accents (warning line, merge flashes) and hot highlights.
   // The page's three r182 UnrealBloomPass strength, unchanged: minor 29 bloom follows r185 as the page did.
-  renderer.bloom = next.bloom ? { strength: 0.35, radius: 0.35, threshold: 0.92, resolution: b.bloomRes } : null;
+  renderer.bloom = next.bloom === null ? null : { strength: 0.35, radius: 0.35, threshold: 0.92, resolution: next.bloom };
   // render-gfx.js GradeShader (linear light before the output): a gentle S-curve, a touch more saturation, warm
   // highlights / cool shadows, the 0.2 vignette.
   renderer.grade = next.grade ? {

@@ -137,11 +137,10 @@ The scene (`native/render.ts`, ported from the browser build's three.js r182 cod
 
 The procedural canvas textures (wood, awning, valance, cloth, grass, skin relief, sky, the particle dot) are baked once by the browser build's own painters (`tools/bake-textures.mjs`, Chrome) into `assets/textures/*.png` at scale 1 and 2.
 
-**Quality** follows the runtime's graphics level (Options › Graphics): `frame().quality` picks the browser build's preset row and budget (`native/quality.ts`), and the level within the tier scales droplets and motes (≤ 2×, at most 480 / 300). Render scale, the pixel-ratio cap, adaptive resolution, the frame-rate limit and readout and the GPU summary are the runtime's; the old per-category overrides are not offered.
+**Quality** follows the runtime's graphics level (Options › Graphics): the engine's level table (`levelSettings()`) sets shadows and their map size, AO, bloom, grade and anti-aliasing; `frame().quality` picks the browser build's art row and budget (`native/quality.ts`), and the level's particle budget against the tier's anchor level scales droplets and motes (≤ 2×, at most 480 / 300). Render scale, the pixel-ratio cap, adaptive resolution, the frame-rate limit and readout and the GPU summary are the runtime's; the old per-category overrides are not offered.
 
 | Budget | Low | Balanced | High | Ultra |
 |---|---|---|---|---|
-| Shadows / AO / bloom / grade / AA | off / off / off / off / off | 1024 / off / on / on / FXAA | 2048 / on / on / on / SMAA | 4096 / high / on / on / MSAA |
 | Reflections, detailed scenery | no | yes | yes | yes |
 | Stall and fruit shading | Lambert | Standard | glossy Physical skins | as High |
 | Fruit sphere segments | 20×14 | 28×20 | 40×28 | 56×36 |
@@ -149,7 +148,6 @@ The procedural canvas textures (wood, awning, valance, cloth, grass, skin relief
 | Baked texture scale | — | 1× | 1× | 2× |
 | Orchard trees / fruit per tree | — | half / 3 | all / 6 | all / 8 |
 | Juice droplets / pollen motes | none / static | 48 / 60 | 160 / 90 | 240 / 150 |
-| Bloom / GTAO resolution | ½ | ½ | ½ | full |
 
 The old frosted (blurred) overlay backdrop on High/Ultra is not ported: the cards dim the stall with the same tint on every level. The peach's velvet sheen is left out (the engine draws no sheen).
 

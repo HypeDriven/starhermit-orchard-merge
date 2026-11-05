@@ -1,0 +1,47 @@
+# Tier bench: the Daily's crate (fixed seed for the day), fruit dropped at the centre, merges and droplets running.
+until 300 =▶ Play
+frames 150
+click =Daily
+until 60 One ranked run per day
+frames 10
+click =Start
+until 300 =Drop
+frames 120
+measure start
+key Space 1
+frames 34
+key Space 1
+frames 34
+key Space 1
+frames 34
+key Space 1
+frames 34
+key Space 1
+frames 34
+key Space 1
+frames 34
+key Space 1
+frames 34
+key Space 1
+frames 34
+key Space 1
+frames 34
+key Space 1
+frames 34
+key Space 1
+frames 34
+key Space 1
+frames 34
+key Space 1
+frames 34
+key Space 1
+frames 34
+key Space 1
+frames 34
+key Space 1
+frames 34
+key Space 1
+frames 34
+key Space 1
+frames 34
+measure stop

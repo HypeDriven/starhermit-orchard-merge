@@ -14,7 +14,7 @@
 // every button.
 import "./i18n.ts";
 import {
-  clipboard, frame, onFixedUpdate, onPreferencesChange, onQuit, onRender, onResume, onStart, onSuspend, onUpdate, preferences,
+  clipboard, frame, levelSettings, onFixedUpdate, onPreferencesChange, onQuit, onRender, onResume, onStart, onSuspend, onUpdate, preferences,
 } from "starhermit:engine";
 import { isDown, onAction, onPointerButton, onPointerMove, onTouch, vibrate } from "starhermit:input";
 import * as ui from "starhermit:ui";
@@ -499,11 +499,11 @@ function crateInput(): void {
 let lookKey = "";
 function applyLook(): void {
   const f = frame();
-  const k = `${f.quality}:${f.levelIndex}:${options.palette}`;
+  const k = `${f.level}:${options.palette}`;
   if (k === lookKey) return;
   lookKey = k;
   const colors = (P.PALETTES as Record<string, (string | null)[]>)[options.palette] ?? P.PALETTES.default;
-  render.applyLook(lookFor(f.quality, f.levelIndex), colors);
+  render.applyLook(lookFor(levelSettings(f.level)), colors);
 }
 
 onStart(() => {

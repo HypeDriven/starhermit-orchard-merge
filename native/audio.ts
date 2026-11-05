@@ -10,9 +10,9 @@
 // rendered into a looping clip (createClip, in slices over several frames):
 // a live synthesis graph makes clip loads fail on the engine's web runtime.
 // The synthesized stand-ins the browser build played while a sample was
-// still decoding are not ported, so a sample still loading is silent. Clips
-// load once the mixer runs (natively at once, in a browser after the first
-// press), one at a time.
+// still decoding are not ported, so a sample still loading is silent. Every
+// clip loads at once from onStart; the ambience waits for the mixer (natively
+// at once, in a browser after the first press).
 import { context, createClip, loadClip, play as playClip, type AudioClip, type Sound } from "starhermit:audio";
 
 const LEVEL = { effects: 0.8, ambience: 0.4 };
@@ -22,20 +22,14 @@ const SAMPLES = [
 ];
 
 const clips = new Map<string, AudioClip>();
-const queue: string[] = [];
-let loading = false;
-let wantClips = false;
 let suspended = false;
 
-function load(name: string): void { if (!queue.includes(name) && !clips.has(name)) queue.push(name); }
-function pump(): void {
-  if (loading || !queue.length) return;
-  const name = queue.shift()!;
-  loading = true;
-  loadClip(`sfx/${name}.opus`).then((c) => { clips.set(name, c); loading = false; }, (e: unknown) => { console.warn(`sfx ${name}: ${String(e)}`); loading = false; });
+/** Loads every clip at once (onStart); a cue whose clip is still loading is silent. */
+export function loadSfx(): void {
+  for (const name of SAMPLES) {
+    loadClip(`sfx/${name}.opus`).then((c) => { clips.set(name, c); }, (e: unknown) => { console.warn(`sfx ${name}: ${String(e)}`); });
+  }
 }
-/** Asks for the clips; they load once the mixer runs (see update). */
-export function loadSfx(): void { wantClips = true; }
 /** A hidden window holds all sound. */
 export function setSuspended(on: boolean): void { suspended = on; }
 
@@ -44,7 +38,7 @@ function sample(name: string): void {
   const clip = clips.get(name);
   if (!clip) return;
   try { playClip(clip, { bus: "effects", gain: LEVEL.effects }); }
-  catch { clips.delete(name); load(name); } // a clip the mixer lost: load it again
+  catch { /* the mixer is full this frame: skip it */ }
 }
 export const sfx = {
   click: (): void => sample("ui-click"),
@@ -90,16 +84,9 @@ function ambienceSlice(): AudioClip | null {
 let ambience: AudioClip | null = null;
 let ambSound: Sound | null = null;
 
-/** Each frame: the samples once the mixer runs (one at a time), then the ambience clip, then the loop by state. */
+/** Each frame, once the mixer runs: the ambience clip, then the loop by state. */
 export function update(): void {
   if (context.state !== "running") return;
-  if (wantClips) {
-    wantClips = false;
-    for (const n of SAMPLES) load(n);
-    return;
-  }
-  pump();
-  if (loading || queue.length) return;
   if (!ambience) { ambience = ambienceSlice(); return; }
   try {
     if (!suspended && !ambSound) ambSound = playClip(ambience, { bus: "music", gain: LEVEL.ambience, loop: true });
