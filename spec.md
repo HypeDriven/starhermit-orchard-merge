@@ -104,8 +104,8 @@ Layouts are picked each frame from the window's logical size (`native/screens.ts
 
 ### Localization
 
-- Every player-facing string ships in en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR and it-IT. `src/i18n.js` looks strings up by their US-English text in `src/locales/*.js` (es-ES and fr-CA list only their differences, en-GB only its spelling changes); the account strings (sign-in, invite, toasts, the leaderboard line) are `src/sh-strings.js`. The two rich help paragraphs keep their old keys (with `<strong>` and key-chip markup), drawn as plain text with the effective keys filled in.
-- The language is the runtime's interface language (`preferences().language`: Options › Language, else the account's preferred language, else the device's), mapped to the nearest shipped locale (`native/i18n.ts`); a change shows on the next frame. The browser build's own Language setting (`sh-language.js`, `ui.language`) is replaced by the runtime's.
+- Every player-facing string ships in en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR and it-IT. The engine's `strings` looks them up by their US-English text in `assets/strings.json` (en-GB lists only its spelling changes); the account strings (sign-in, invite, toasts, the leaderboard line) are the engine's `starhermit.*` keys. The two rich help paragraphs keep their old keys (with `<strong>` and key-chip markup), drawn as plain text with the effective keys filled in.
+- The language is the runtime's interface language (`preferences().language`: Options › Language, else the account's preferred language, else the device's), through the engine's locale chain (`native/i18n.ts`); a change shows on the next frame. The browser build's own Language setting (`sh-language.js`, `ui.language`) is replaced by the runtime's.
 - `tests/i18n.test.mjs` checks every `T()`/`N()` key in `src/` and `native/` exists in all nine locales with the same placeholders and markup, that no locale carries unused keys, and the account strings.
 
 ## 4. Visual and audio design
@@ -165,7 +165,7 @@ The old frosted (blurred) overlay backdrop on High/Ultra is not ported: the card
 
 - `src/rules.js` — the deterministic rules (classic UMD script; loaded by the engine with `loadClassic`, by Node tests and `server.js` with `require`), unchanged.
 - `src/progress.js` — content and save model: palettes, fruit names, journey stages, challenges, achievements, the save document's reader, the browser build's cloud document reader, the game's options; `src/save-merge.js` — the merge of two saves.
-- `src/i18n.js`, `src/locales/`, `src/sh-strings.js` — strings.
+- `assets/strings.json` — strings, loaded through the engine's `strings`.
 - `native/main.ts` — the entry: the run (60 Hz fixed steps, countdown, drops, undo, hints, fast-forward settling spread over frames, tutorial steps, results, achievements, journey and daily progress, local best runs with replays, leaderboard posting), navigation, input, lifecycle.
 - `native/screens.ts` — every screen and the HUD; `native/style.ts` + `assets/ui-style.json` (from `tools/ui-style.css`, `npm run css`) — the look; `native/render.ts` — the 3D stall; `native/quality.ts` — looks per level; `native/audio.ts` — sound; `native/platform.ts` — saves, options, the player, the clock, leaderboards; `native/rules.ts` — the typed facade over `src/rules.js`.
 

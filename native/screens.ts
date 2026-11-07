@@ -8,7 +8,7 @@
 // the left, the score and control rail on the right), compact (the top bar
 // with the score and fruit badges, the thumb tray with the aim slider and
 // buttons at the bottom) and short landscape (≤ 500 px tall: the tray in one
-// row). Plus the warning banner, the countdown and the toast.
+// row). Plus the warning banner and the countdown.
 import { frame, openMenu } from "starhermit:engine";
 import { bindings, requestRebind } from "starhermit:input";
 import * as draw from "starhermit:draw";
@@ -27,11 +27,9 @@ import {
 // ------------------------------------------------------------------ layout and helpers
 interface Layout { lw: number; lh: number; sc: number; ox: number; oy: number; desktop: boolean; shortLand: boolean }
 function layoutNow(): Layout {
-  const f = frame();
-  const sc = ui.preferences().scale;
-  const sa = f.safeArea;
-  const lw = Math.max(1, (f.width - sa.left - sa.right) / sc), lh = Math.max(1, (f.height - sa.top - sa.bottom) / sc);
-  return { lw, lh, sc, ox: sa.left, oy: sa.top, desktop: lw >= 1024, shortLand: lw < 1024 && lh <= 500 && lw > lh };
+  const v = ui.viewport!();
+  const lw = Math.max(1, v.width), lh = Math.max(1, v.height), sc = v.scale;
+  return { lw, lh, sc, ox: v.x * sc, oy: v.y * sc, desktop: lw >= 1024, shortLand: lw < 1024 && lh <= 500 && lw > lh };
 }
 const lastSize = new Map<string, number>();
 const prefs = (): ui.UiPreferences => ui.preferences();
@@ -128,7 +126,6 @@ export function drawScreens(): void {
     };
     card(app.screen, L, builders[app.screen]!, app.screen === "title" || app.screen === "pause");
   }
-  toast(L);
   if (app.focusNext) {
     const age = f.frame - app.openedFrame;
     const target = app.focusNext === "first" ? firstId : app.focusNext;
@@ -181,8 +178,8 @@ function titleCard(w: number): void {
     { id: "bt-help", text: T("Help"), act: openHelp },
   ], w, 10, "center");
   const acct: Btn[] = [];
-  if (!platform.signedIn()) acct.push({ id: "bt-sh-signin", text: account().signIn, act: signIn });
-  if (platform.inviteLink()) acct.push({ id: "bt-sh-invite", text: account().invite, act: copyInvite });
+  if (!platform.signedIn()) acct.push({ id: "bt-sh-signin", text: account("signIn"), act: signIn });
+  if (platform.inviteLink()) acct.push({ id: "bt-sh-invite", text: account("invite"), act: copyInvite });
   if (acct.length) flow("title-account", acct, w, 10, "center");
 }
 function profileLine(): string {
@@ -229,7 +226,7 @@ function setupCard(w: number): void {
     heading("h2", T("Practice"), w);
     para(T("Free play with undo. Not ranked. Restart anytime."), w);
     const opts = [T("Easy"), T("Normal"), T("Hard")];
-    const pick = ui.id("practice-diff").select(T("Difficulty"), app.practiceDiff, opts, { width: Math.min(w, 260) } as ui.WidgetOptions);
+    const pick = ui.id("practice-diff").select(T("Difficulty"), app.practiceDiff, opts);
     if (pick !== app.practiceDiff) app.practiceDiff = pick;
   } else if (m === "challenge") {
     heading("h2", T("Challenge"), w);
@@ -348,7 +345,7 @@ function settingsCard(w: number): void {
     ui.spacer();
     const names = P.PALETTE_NAMES.map(([, n]) => T(n));
     const idx = Math.max(0, P.PALETTE_NAMES.findIndex(([id]) => id === options.palette));
-    const pick = ui.id("set-palette").select(T("Color palette"), idx, names, { width: sw } as ui.WidgetOptions);
+    const pick = ui.id("set-palette").select(T("Color palette"), idx, names);
     if (pick !== idx) platform.setOption("palette", P.PALETTE_NAMES[pick]![0]);
   }, { width: w, align: "center" });
   para(T("Sound, graphics quality, language, reduced motion, high contrast and larger text are in the StarHermit Options."), w, "small", "options-note");
@@ -360,7 +357,7 @@ function settingsCard(w: number): void {
 }
 
 // The old help markup's keys (index.html data-i18n-html): their <span class="kbd" data-key-action> show the effective keys.
-const HELP_CONTROLS = N('Drag / aim slider, <span class="kbd" data-key-action="aimLeft">←</span><span class="kbd" data-key-action="aimRight">→</span> aim, <span class="kbd" data-key-action="drop">Space</span> drop, <span class="kbd" data-key-action="undo">U</span> undo (practice), <span class="kbd" data-key-action="hint">H</span> hint, <span class="kbd" data-key-action="pause">P</span> pause, <span class="kbd" data-key-action="restart">R</span> restart.');
+const HELP_CONTROLS = N('help.keyboard');
 const HELP_MODES = N('<strong>Learn</strong>: guided tutorial. <strong>Journey</strong>: 40 staged goals. <strong>Daily</strong>: one ranked run per UTC day. <strong>Practice</strong>: relaxed, with undo. <strong>Challenge</strong>: preset rule variants.');
 function rich(html: string): string {
   return plain(html).replace(/<span class="kbd" data-key-action="(\w+)">[^<]*<\/span>/g, (_m, a: string) => ` ${keysFor(a.toLowerCase())} `)
@@ -535,11 +532,4 @@ function warnBanner(L: Layout): void {
   });
 }
 
-function toast(L: Layout): void {
-  const t = app.toast;
-  if (!t) return;
-  const text = t.text();
-  const w = Math.min(L.lw * 0.9, 420);
-  ui.place("toast", { anchor: "bottom", y: 16 }, () => ui.style("toast", { width: w }).column("toast-col", () => para(text, w - 34, "toast-text", "sh-toast", true), { width: w, align: "center" }));
-}
 void R;

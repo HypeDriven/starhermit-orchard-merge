@@ -2,9 +2,12 @@
 // Keys are the US-English source strings in src/ and native/ (see tests/i18n-keys.mjs).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DICTS, LOCALES, T, setLocale } from '../src/i18n.js';
-import { SH_STRINGS } from '../src/sh-strings.js';
+import { readFileSync } from 'node:fs';
 import { ALL } from './i18n-keys.mjs';
+
+const DICTS = JSON.parse(readFileSync(new URL('../assets/strings.json', import.meta.url), 'utf8'));
+const LOCALES = Object.keys(DICTS);
+const PARENT = { 'en-GB': 'en-US' };
 
 const placeholders = (s) => [...String(s).matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join(',');
 const tags = (s) => (String(s).match(/<[^>]+>/g) || []).join('');
@@ -18,8 +21,9 @@ for (const locale of LOCALES.filter((l) => l !== 'en-US' && l !== 'en-GB')) {
     const dict = DICTS[locale];
     const missing = [...ALL].filter((k) => !Object.prototype.hasOwnProperty.call(dict, k));
     assert.deepEqual(missing, [], `${missing.length} missing in ${locale}`);
-    assert.deepEqual([...ALL].filter((k) => placeholders(dict[k]) !== placeholders(k)), [], 'placeholder mismatch');
-    assert.deepEqual([...ALL].filter((k) => tags(dict[k]) !== tags(k)), [], 'markup mismatch');
+    const en = DICTS['en-US'];
+    assert.deepEqual([...ALL].filter((k) => placeholders(dict[k]) !== placeholders(en[k])), [], 'placeholder mismatch');
+    assert.deepEqual([...ALL].filter((k) => tags(dict[k]) !== tags(en[k])), [], 'markup mismatch');
   });
 }
 
@@ -30,27 +34,12 @@ test('no locale carries keys that no longer exist', () => {
   }
 });
 
-test('the StarHermit account strings exist in all nine locales with the same placeholders', () => {
-  const keys = Object.keys(SH_STRINGS['en-US']);
-  for (const locale of LOCALES) {
-    assert.deepEqual(Object.keys(SH_STRINGS[locale] || {}), keys, locale);
-    for (const k of keys) assert.equal(placeholders(SH_STRINGS[locale][k]), placeholders(SH_STRINGS['en-US'][k]), `${locale} ${k}`);
-  }
-  assert.notEqual(SH_STRINGS['de-DE'].signIn, SH_STRINGS['en-US'].signIn);
-});
-
-test('T falls back to the key and fills placeholders; regional variants inherit', () => {
-  setLocale('de-DE');
-  assert.equal(T('Not a real key {x}', { x: 1 }), 'Not a real key 1');
-  assert.equal(T('Now: {fruit}', { fruit: 'Kirsche (1)' }), 'Jetzt: Kirsche (1)');
-  setLocale('fr-CA');
-  assert.equal(T('Score'), 'Pointage');
-  assert.equal(T('Hint'), 'Indice');
-  setLocale('es-ES');
-  assert.equal(T('Settings'), 'Ajustes');
-  assert.equal(T('Hint'), 'Pista');
-  setLocale('en-GB');
-  assert.equal(T('Color palette'), 'Colour palette');
-  setLocale('en-US');
-  assert.equal(T('Hint'), 'Hint');
+test('regional variants read their own or the shared text', () => {
+  const T = (l, k) => { for (let c = l; c; c = PARENT[c]) if (Object.hasOwn(DICTS[c], k)) return DICTS[c][k]; return k; };
+  assert.equal(T('fr-CA', 'Score'), 'Pointage');
+  assert.equal(T('fr-CA', 'Hint'), 'Indice');
+  assert.equal(T('es-ES', 'Settings'), 'Ajustes');
+  assert.equal(T('es-ES', 'Hint'), 'Pista');
+  assert.equal(T('en-GB', 'Color palette'), 'Colour palette');
+  assert.equal(T('en-US', 'Hint'), 'Hint');
 });

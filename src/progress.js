@@ -3,7 +3,7 @@
 // build's src/main.js unchanged in meaning: the fruit tiers and palettes, the
 // journey stages, the challenges, the achievements, the save document and its
 // readers (this device's save, the browser build's cloud document).
-import { N } from './i18n.js';
+const N = (s) => s; // marks an English key for the translation check
 import { mergeSaves } from './save-merge.js';
 
 export const SAVE_VERSION = 1;

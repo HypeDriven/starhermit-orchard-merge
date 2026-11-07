@@ -1,8 +1,7 @@
 // Orchard Merge on the StarHermit engine: the entry module (starhermit.txt
 // engine.entry), played natively by the StarHermit client and in browsers by
 // the engine's web runtime. The deterministic rules (src/rules.js), the
-// content and save model (src/progress.js, src/save-merge.js) and the string
-// tables (src/i18n.js, src/locales) are the browser build's pure modules,
+// content and save model (src/progress.js, src/save-merge.js) are the browser build's pure modules,
 // shared with the Node tests and the dev server; this module is what its
 // src/main.js did around them: the run (modes, the countdown, the 60 Hz
 // fixed-step simulation, drops, practice undo, hints, fast-forward settling,
@@ -30,7 +29,6 @@ import { drawScreens } from "./screens.ts";
 import { applyContrast, initStyles } from "./style.ts";
 
 const { WORLD_W, TIER_R } = R;
-type Text = () => string;
 export type Screen = "title" | "setup" | "pause" | "results" | "settings" | "help" | null;
 export type Mode = "learn" | "journey" | "daily" | "practice" | "challenge";
 export type SetupMode = Mode | "scores";
@@ -47,7 +45,6 @@ export const app = {
   practiceDiff: 1,
   /** The Score chase's global board rows (null: loading, none or guest). */
   boardRows: null as platform.BoardRow[] | null,
-  toast: null as null | { text: Text; until: number },
   /** The countdown's text and the fixed steps until it changes. */
   countdown: null as null | { n: number; ticks: number },
   warn: false,
@@ -64,7 +61,8 @@ export const save = (): platform.Save => platform.save;
 // ------------------------------------------------------------------ text helpers
 export const tierName = (tier: number): string => (P.TIER_NAMES[tier] ? T(P.TIER_NAMES[tier]!) : "—");
 export function announce(text: string): void { if (text) ui.announce(text.slice(0, 480)); }
-export function toast(text: Text): void { app.toast = { text, until: now() + 3.2 }; announce(text()); }
+/** A notice at the window's bottom; a press still reaches the crate. */
+export function toast(text: string): void { ui.toast!(text, { duration: 3.2, style: ["toast", "toast-text"], dismissible: false, position: "bottom" }); }
 export const motionOK = (): boolean => !preferences().reducedMotion;
 
 // ------------------------------------------------------------------ screens
@@ -317,7 +315,7 @@ export function resultsHeadline(): string {
 export function lbLine(): string | null {
   const r = app.lbResult;
   if (r === undefined) return null;
-  return !r ? account().lbPosting : !r.posted ? account().lbNotPosted : r.rank ? account().lbRank.replace("{rank}", String(r.rank)) : account().lbPosted;
+  return !r ? account("leaderboardPosting") : !r.posted ? account("leaderboardNotPosted") : r.rank ? account("leaderboardRank", { rank: r.rank }) : account("leaderboardPosted");
 }
 
 export function objectiveText(): string {
@@ -413,7 +411,7 @@ export function copyInvite(): void {
   if (!link) return;
   let ok = false;
   try { clipboard.writeText(link); ok = true; } catch { ok = false; }
-  toast(ok ? () => account().copied : () => account().copyFailed);
+  toast(account(ok ? "inviteCopied" : "inviteFailed"));
 }
 
 // ------------------------------------------------------------------ input
@@ -517,7 +515,7 @@ onStart(() => {
 platform.onOptionsChange(() => applyLook());
 platform.onMerged(() => { if (run.phase === "title") gotoTitle(); });
 onPreferencesChange((p) => render.setReducedMotion(p.reducedMotion));
-onSessionEnded(() => toast(() => account().signedOut));
+onSessionEnded(() => toast(account("signedOut")));
 onSuspend(() => {
   if (run.phase === "active") serializeResume();
   audio.setSuspended(true);
@@ -566,7 +564,6 @@ onUpdate((dt) => {
   applyLook();
   applyContrast(ui.preferences().highContrast);
   audio.update();
-  if (app.toast && app.toast.until < now()) app.toast = null;
 });
 onRender(() => {
   drawScreens();
