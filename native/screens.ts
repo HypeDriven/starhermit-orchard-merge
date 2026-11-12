@@ -1,3 +1,6 @@
+import { localizedStyle as __l10nStyle } from "./l10n/font.ts";
+// localization-runtime:attached
+import { openLocalizedOptions as __l10nOptions } from "./l10n/menu.ts";
 // The browser build's DOM (index.html: the HUD, the screens, the banners) as
 // starhermit:ui, built every frame over the 3D stall: the title, the mode
 // setup (Tutorial, Journey's 40 stages, Daily, Practice's difficulty,
@@ -9,7 +12,18 @@
 // with the score and fruit badges, the thumb tray with the aim slider and
 // buttons at the bottom) and short landscape (≤ 500 px tall: the tray in one
 // row). Plus the warning banner and the countdown.
-import { frame, openMenu } from "starhermit:engine";
+// The browser build's DOM (index.html: the HUD, the screens, the banners) as
+// starhermit:ui, built every frame over the 3D stall: the title, the mode
+// setup (Tutorial, Journey's 40 stages, Daily, Practice's difficulty,
+// Challenge's three variants, Score chase's local best runs and the global
+// board), the pause, results, settings and help cards over a dimmed stall,
+// and the HUD of a run. The browser's media queries are layouts picked by the
+// window's logical size: desktop (≥ 1024 px: the objective and board rail on
+// the left, the score and control rail on the right), compact (the top bar
+// with the score and fruit badges, the thumb tray with the aim slider and
+// buttons at the bottom) and short landscape (≤ 500 px tall: the tray in one
+// row). Plus the warning banner and the countdown.
+import { frame } from "starhermit:engine";
 import { bindings, requestRebind } from "starhermit:input";
 import * as draw from "starhermit:draw";
 import * as ui from "starhermit:ui";
@@ -66,16 +80,16 @@ function button(b: Btn, width: number | null = null): boolean {
   if (b.kbd || wraps || b.size) {
     opts.content = () => {
       const txt = { text: { align, weight, size: b.size ?? 16 } } as ui.Style;
-      if (wraps && !b.kbd) { ui.style(txt).paragraph(b.text, inner!); return; }
+      if (wraps && !b.kbd) { ui.style(__l10nStyle(txt)).paragraph(b.text, inner!); return; }
       ui.row(`${b.id}-face`, () => {
-        if (wraps) ui.style(txt).paragraph(b.text, Math.max(20, inner! - tw(b.kbd ?? "", "kbd") - 22));
-        else ui.style(txt).label(b.text);
-        if (b.kbd) ui.style("kbd-box").row(`${b.id}-kbd`, () => { ui.style("kbd").label(b.kbd!); });
+        if (wraps) ui.style(__l10nStyle(txt)).paragraph(b.text, Math.max(20, inner! - tw(b.kbd ?? "", "kbd") - 22));
+        else ui.style(__l10nStyle(txt)).label(b.text);
+        if (b.kbd) ui.style(__l10nStyle("kbd-box")).row(`${b.id}-kbd`, () => { ui.style(__l10nStyle("kbd")).label(b.kbd!); });
       }, { spacing: 6, align: "center" });
     };
   }
   if (!firstId && !b.disabled) firstId = b.id;
-  const hit = ui.style(cls, width != null ? { width } : {}).id(b.id).button(b.text, opts);
+  const hit = ui.style(__l10nStyle(cls), __l10nStyle(width != null ? { width } : {})).id(b.id).button(b.text, opts);
   if (hit && !fresh(0)) { b.act(); if (app.screen === null && pointerActivation()) ui.setFocus(null); }
   return hit;
 }
@@ -90,7 +104,7 @@ function para(text: string, width: number, cls = "p", id?: string, center = fals
   if (!text) return;
   const styles: (string | ui.Style)[] = [cls];
   if (center) styles.push({ text: { align: "center" } });
-  let u = ui.style(...styles);
+  let u = ui.style(...__l10nStyle(styles));
   if (id) u = u.id(id);
   if (tw(text, styles) <= width) u.label(text);
   else u.paragraph(text, width);
@@ -99,9 +113,9 @@ function heading(cls: string, text: string, width: number, center = false): void
   const styles: (string | ui.Style)[] = [cls];
   if (center) styles.push({ text: { align: "center" } });
   if (tw(text, cls, "heading") <= width) {
-    if (center) ui.row(`${cls}-${text}-c`, () => { ui.style(cls).heading(text); }, { width, justify: "center" });
-    else ui.style(cls).heading(text);
-  } else ui.style(...styles).paragraph(text, width);
+    if (center) ui.row(`${cls}-${text}-c`, () => { ui.style(__l10nStyle(cls)).heading(text); }, { width, justify: "center" });
+    else ui.style(__l10nStyle(cls)).heading(text);
+  } else ui.style(...__l10nStyle(styles)).paragraph(text, width);
 }
 
 // ------------------------------------------------------------------ the frame
@@ -116,7 +130,7 @@ export function drawScreens(): void {
     const c = app.countdown;
     const text = c.n > 0 ? String(c.n) : T("Go!");
     ui.place("countdown", "center", () => {
-      ui.style({ text: { size: 96, weight: "900", color: "$accent", align: "center" } }).id("countdown").label(text);
+      ui.style(__l10nStyle({ text: { size: 96, weight: "900", color: "$accent", align: "center" } })).id("countdown").label(text);
     });
   }
   if (app.screen) {
@@ -144,7 +158,7 @@ function card(key: string, L: Layout, build: (w: number) => void, center = false
   const inner = outer - 2 * pad - 4 - (scroll ? 14 : 0);
   ui.place(`card-${key}`, "center", () => {
     const body = (): void => {
-      const r = ui.style("card", { width: outer, padding: pad }).id(`scr-${key}`).column(`${key}-card`, () => build(inner), { width: outer, spacing: center ? 14 : 10, align: center ? "center" : "start" });
+      const r = ui.style(__l10nStyle("card"), __l10nStyle({ width: outer, padding: pad })).id(`scr-${key}`).column(`${key}-card`, () => build(inner), { width: outer, spacing: center ? 14 : 10, align: center ? "center" : "start" });
       lastSize.set(key, r.height / L.sc);
     };
     if (scroll) ui.scrollArea(`${key}-scroll`, { width: outer + 14, height: avail }, body, fresh(6) ? { scrollTo: { top: 0 } } : undefined);
@@ -211,7 +225,7 @@ function setupCard(w: number): void {
         const text = String(i + 1) + (cleared ? " ★" : "");
         const tip = T("Stage {n}: score {score}, tier {tier}, {drops} drops", { n: i + 1, score: st.goals.targetScore, tier: st.goals.requireTier, drops: st.goals.maxDrops });
         if (!firstId && unlocked) firstId = `stage-${i + 1}`;
-        const hit = ui.style("stage", { width: cw }).id(`stage-${i + 1}`).button(text, { disabled: !unlocked, tooltip: tip });
+        const hit = ui.style(__l10nStyle("stage"), __l10nStyle({ width: cw })).id(`stage-${i + 1}`).button(text, { disabled: !unlocked, tooltip: tip });
         if (hit && !fresh(0)) startStage(i);
       }
     }, { columns: cols, gap, width: w });
@@ -255,9 +269,9 @@ function table(id: string, headers: string[], rows: string[][], w: number): void
   const k = sum > w ? w / sum : 1;
   const cw = want.map((x) => x * k);
   const cell = (text: string, c: number, cls: string, key: string): void => {
-    ui.style("row-line", { width: cw[c]! }).row(key, () => {
-      if (tw(text, cls) <= cw[c]! - 16) ui.style(cls).label(text);
-      else ui.style(cls).paragraph(text, cw[c]! - 16);
+    ui.style(__l10nStyle("row-line"), __l10nStyle({ width: cw[c]! })).row(key, () => {
+      if (tw(text, cls) <= cw[c]! - 16) ui.style(__l10nStyle(cls)).label(text);
+      else ui.style(__l10nStyle(cls)).paragraph(text, cw[c]! - 16);
     }, { width: cw[c]! });
   };
   ui.id(id).column(id, () => {
@@ -314,10 +328,10 @@ function resultsCard(w: number): void {
   const vw = Math.max(...rows.map(([, v]) => tw(v, "th"))) + 20;
   ui.id("res-breakdown").column("res-breakdown", () => {
     rows.forEach(([k, v, strong], i) => {
-      ui.style("row-line", { width: w }).row(`res-row-${i}`, () => {
+      ui.style(__l10nStyle("row-line"), __l10nStyle({ width: w })).row(`res-row-${i}`, () => {
         para(k, w - vw - 16, strong ? "th" : "td");
         ui.spacer();
-        ui.style(strong ? "th" : "td").id(`res-v-${i}`).label(v);
+        ui.style(__l10nStyle(strong ? "th" : "td")).id(`res-v-${i}`).label(v);
       }, { width: w, align: "center" });
     });
   }, { spacing: 0, width: w });
@@ -350,7 +364,7 @@ function settingsCard(w: number): void {
   }, { width: w, align: "center" });
   para(T("Sound, graphics quality, language, reduced motion, high contrast and larger text are in the StarHermit Options."), w, "small", "options-note");
   flow("set-options", [
-    { id: "btn-options", text: T("Audio, graphics & accessibility"), act: () => openMenu() },
+    { id: "btn-options", text: T("Audio, graphics & accessibility"), act: () => __l10nOptions() },
     { id: "btn-rebind", text: T("Controls"), act: () => requestRebind() },
   ], w);
   button({ id: "set-close", text: T("Done"), cls: "primary", act: closeSettings }, w);
@@ -372,7 +386,7 @@ function helpCard(w: number): void {
     [T("Modes"), rich(T(HELP_MODES))],
   ];
   panels.forEach(([h, p], i) => {
-    ui.style("inset", { width: w }).column(`help-${i}`, () => {
+    ui.style(__l10nStyle("inset"), __l10nStyle({ width: w })).column(`help-${i}`, () => {
       heading("h3", h, w - 28);
       para(p, w - 28, "p", `help-p-${i}`);
     }, { width: w, spacing: 6 });
@@ -406,11 +420,11 @@ function rail(key: string, anchor: "top-start" | "top-end", w: number, L: Layout
 }
 function leftRail(w: number): void {
   const iw = w - 28;
-  ui.style("panel", { width: w }).id("objective-panel").column(T("Objective"), () => {
+  ui.style(__l10nStyle("panel"), __l10nStyle({ width: w })).id("objective-panel").column(T("Objective"), () => {
     para(T("Objective"), iw, "small", "objective-h");
     para(objectiveText(), iw, "p", "objective");
   }, { width: w, spacing: 4 });
-  ui.style("panel", { width: w }).id("board-panel").column(T("Board"), () => {
+  ui.style(__l10nStyle("panel"), __l10nStyle({ width: w })).id("board-panel").column(T("Board"), () => {
     para(T("Board"), iw, "small", "board-h");
     boardList(iw, 160);
   }, { width: w, spacing: 4 });
@@ -426,7 +440,7 @@ function boardList(w: number, maxH: number): void {
   const scroll = est > maxH;
   const inner = w - (scroll ? 14 : 0) - 12;
   const body = (): void => {
-    const r = ui.style("board-list", { width: w - (scroll ? 14 : 0) }).id("board-list").column(T("Fruits on the board"), () => {
+    const r = ui.style(__l10nStyle("board-list"), __l10nStyle({ width: w - (scroll ? 14 : 0) })).id("board-list").column(T("Fruits on the board"), () => {
       items.forEach((t, i) => para(t, inner, "small-ink", `board-item-${i}`));
     }, { width: w - (scroll ? 14 : 0), spacing: 2 });
     lastSize.set("board-list", r.height / prefs().scale);
@@ -438,7 +452,7 @@ function fruitText(tier: number): string { return `${tierName(tier)} (${tier})`;
 function rightRail(w: number): void {
   const s = run.state!;
   const iw = w - 28;
-  ui.style("panel", { width: w }).id("score-panel").column(T("Score"), () => {
+  ui.style(__l10nStyle("panel"), __l10nStyle({ width: w })).id("score-panel").column(T("Score"), () => {
     const c = (text: string, cls: string, id: string): void => para(text, iw, cls, id, true);
     c(T("Score"), "small", "score-h");
     c(String(s.score), "score-big", "score-big");
@@ -447,7 +461,7 @@ function rightRail(w: number): void {
     c(T("Next"), "small", "next-h");
     c(fruitText(s.nextTier), "fruit-big", "next-fruit");
   }, { width: w, spacing: 2, align: "center" });
-  ui.style("panel", { width: w }).id("control-panel").column(T("Controls"), () => {
+  ui.style(__l10nStyle("panel"), __l10nStyle({ width: w })).id("control-panel").column(T("Controls"), () => {
     para(T("Aim"), iw, "p", "aim-h");
     aimSlider("aim-slider", iw);
     button({ id: "btn-drop", text: T("Drop"), cls: "primary", kbd: firstKey("drop"), disabled: !canDrop(), act: () => tryDrop(run.aimX) }, iw);
@@ -479,11 +493,11 @@ function topBar(L: Layout): void {
   ];
   const widths = items.map(([, t, c], i) => Math.min(iw, tw(t, c) + (i ? 24 : 4)));
   ui.place("topbar", { anchor: "top-start", x: 6, y: 6 }, () => {
-    const r = ui.style("topbar", { width: w }).id("topbar").column(T("Score"), () => {
+    const r = ui.style(__l10nStyle("topbar"), __l10nStyle({ width: w })).id("topbar").column(T("Score"), () => {
       ui.row("top-row", () => {
         items.forEach(([id, text, cls], k) => {
-          if (k === 0) { ui.style(cls).id(id).label(text); return; }
-          ui.style("badge", { width: widths[k]! }).row(`${id}-b`, () => para(text, widths[k]! - 22, cls, id), { width: widths[k]! });
+          if (k === 0) { ui.style(__l10nStyle(cls)).id(id).label(text); return; }
+          ui.style(__l10nStyle("badge"), __l10nStyle({ width: widths[k]! })).row(`${id}-b`, () => para(text, widths[k]! - 22, cls, id), { width: widths[k]! });
         });
       }, { wrap: true, width: iw, gap: { row: 6, column: 8 }, align: "center" });
     }, { width: w, spacing: 6 });
@@ -528,7 +542,7 @@ function warnBanner(L: Layout): void {
   const w = Math.min(L.lw - 32, tw(text, "warn-text") + 36);
   const y = L.desktop ? 8 : Math.max(8, L.lh - (lastSize.get("tray") ?? 100) - 24 - 44);
   ui.place("warn", { anchor: "top", y }, () => {
-    ui.style("warn-banner", { width: w }).id("warn-banner").row(text, () => para(text, w - 34, "warn-text", "warn-text", true), { width: w, justify: "center" });
+    ui.style(__l10nStyle("warn-banner"), __l10nStyle({ width: w })).id("warn-banner").row(text, () => para(text, w - 34, "warn-text", "warn-text", true), { width: w, justify: "center" });
   });
 }
 

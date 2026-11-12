@@ -1,3 +1,4 @@
+import { withLanguageRender as __l10nRender } from "./l10n/menu.ts";
 // Orchard Merge on the StarHermit engine: the entry module (starhermit.txt
 // engine.entry), played natively by the StarHermit client and in browsers by
 // the engine's web runtime. The deterministic rules (src/rules.js), the
@@ -565,10 +566,14 @@ onUpdate((dt) => {
   applyContrast(ui.preferences().highContrast);
   audio.update();
 });
-onRender(() => {
+onRender(__l10nRender(() => {
   drawScreens();
   crateInput();
   render.update(frameDt, {
     state: run.state, aimX: run.aimX, preview: canDrop(), hot: !!run.state && run.state.aboveLineTicks > 0,
   });
-});
+}));
+
+// localization-runtime:menu
+import { installLanguageMenu as __installLanguageMenu } from "./l10n/menu.ts";
+__installLanguageMenu(false);

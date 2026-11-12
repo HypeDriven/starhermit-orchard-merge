@@ -262,3 +262,11 @@ This document does **not** authorize implementation, asset production, monetizat
 - Pre-existing scoring quirk kept (replays and the dev server's validation depend on it): the results list a max-tier bonus that the total does not include (the total is the merge score).
 - Hosted multiplayer does not exist; the high-score post is the only server-script use.
 - Not ported: the frosted overlay blur, the peach's sheen, the WebGL-context-lost card (the runtime owns the device), the old synthesized sound fallbacks while samples decode, the separate ambience volume (the ambience plays on the music bus at the old 40 % level), the old graphics overrides and the old Language selector (the runtime's Options replace them).
+
+<!-- regional-localization:start -->
+
+### Regional interface languages
+
+The string tables include complete regional variants for `fr-BE`, `de-BE`, `en-SG`, `en-HK`, `en-BQ`, `es-CO`, `de-IT`, `fr-IT`, `es-CL`, `es-AR`, `es-EC`, `de-BR`. These reuse the corresponding existing translations in their language family. The runtime can resolve the exact regional tag. Language selection is available from the game’s Options panel or F2 and is saved per player in `ui.language`. Changes apply during play. Additional national, regional and indigenous language packs are only shipped once every English message has a translation with intact placeholders and markup. Complete additional language tables: `nl-BE`, `zh-SG`, `nl-NL`, `fi-FI`, `sv-FI`, `id-ID`, `vi-VN`, `ja-JP`, `ms-SG`, `ta-SG`, `zh-HK`, `yue-HK`, `et-EE`, `da-DE`, `lb-BE`, `co-FR`, `eu-FR`, `ca-FR`, `oc-FR`, `sl-IT`, `ca-IT`, `oc-IT`, `ca-ES`, `eu-ES`, `gl-ES`, `su-ID`, `bew-ID`, `km-VN`, `ru-FI`, `ru-EE`, `fur-IT`.
+
+<!-- regional-localization:end -->
