@@ -12,7 +12,7 @@
     "metadataSource": "starhermit.txt",
     "createdAt": "2026-09-01T07:01:04.775894+00:00",
     "coverArtSource": "manifest",
-    "coverArtUpdatedAt": "2026-11-18T17:52:12.44384+00:00",
+    "coverArtUpdatedAt": "2026-11-22T14:25:32.333769+00:00",
     "submittedByUserId": "2712e04e-461b-4d23-81ae-e40b429128a8",
     "submittedByUsername": "starhermit",
     "hosting": {
@@ -22,9 +22,9 @@
       "pinnedCommitSha": null,
       "deployedCommitSha": null,
       "deployError": null,
-      "deployedAt": "2026-11-18T17:52:12.434006+00:00",
+      "deployedAt": "2026-11-22T14:25:32.321974+00:00",
       "externalLaunchUrl": null,
-      "engineVersion": "1.44.1",
+      "engineVersion": "1.47.0",
       "deployWarning": null
     },
     "description": "Drop fruits into a crate and merge matching sizes into larger fruit without overflowing the container.",
@@ -36,19 +36,19 @@
     "links": [],
     "isDisabled": false
   },
-  "publishedAt": "2026-11-18T17:52:12.413Z",
-  "sourceCommit": "c837699f33303029f66d0b061630e18ef047f952",
-  "bytesReceived": 2554974,
-  "archiveSha256": "f7a7c85a3cf86f528e116ff651855ad0c8e4906d01dce434e4968f707b9f2743",
+  "publishedAt": "2026-11-22T14:25:32.699Z",
+  "sourceCommit": "881ace737c9c8087bce2b263471552df53578235",
+  "bytesReceived": 2555286,
+  "archiveSha256": "5fee7e0ccc65a4f3913ebbb6234c5d989d85bf5f85ee4c9aada96f4a0ac28599",
   "indexSha256": "384be0418eedd73d69d2c1a653516160a8765937fd36780683ae5cc478a205cb",
   "result": {
     "clientPublished": true,
     "serverImageLoaded": false,
     "imageDigest": null,
-    "bytesReceived": 2554974,
+    "bytesReceived": 2555286,
     "mode": "replace",
     "filesRemoved": 0,
-    "engineVersion": "1.44.1",
+    "engineVersion": "1.47.0",
     "deployWarning": null
   },
   "liveVerification": {
