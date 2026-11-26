@@ -1,6 +1,6 @@
 # Orchard Merge — Product and Game Specification
 
-**Document status:** running specification of the game as built (StarHermit engine 1.47.0 port).
+**Document status:** running specification of the game as built (StarHermit engine 1.50.0 port).
 **Game index:** 19  
 **Genre:** Physics merge puzzle  
 **Players:** 1 player; optional asynchronous score comparison  
@@ -187,7 +187,7 @@ The old frosted (blurred) overlay backdrop on High/Ultra is not ported: the card
 ## 6. StarHermit integration
 
 ### Packaging and launch
-- `starhermit.txt`: `launch=index.html` (the loader `npm run package` writes with `starhermit package --web .`, with `starhermit-files.json`), `engine.api=1`, `engine.entry=native/main.ts`, `engine.version=1.47.0`, `engine.minor=47`, capabilities `platform,storage,clipboard`, `server=score-script.js`, `control.*` and `engine.gamepad.*` per action. `.starhermitignore` leaves out tests, tools, `server.js`, docs and source art.
+- `starhermit.txt`: `launch=index.html` (the loader `npm run package` writes with `starhermit package --web .`, with `starhermit-files.json`), `engine.api=1`, `engine.entry=native/main.ts`, `engine.version=1.50.0`, `engine.minor=50`, capabilities `platform,storage,clipboard`, `server=score-script.js`, `control.*` and `engine.gamepad.*` per action. `.starhermitignore` leaves out tests, tools, `server.js`, docs and source art.
 - Signing in, the session and token renewal are the runtime's; a guest can sign in from the title (**Sign in with StarHermit**, `requestSignIn`). A session that ends shows the "signed out" toast; play continues on the device.
 
 ### Identity, preferences, and progress
@@ -271,9 +271,9 @@ The string tables include complete regional variants for `fr-BE`, `de-BE`, `en-S
 
 <!-- regional-localization:end -->
 
-## Engine 1.47.0
+## Engine 1.50.0
 
-Browser play uses the WebGPU-only StarHermit 1.47.0 web runtime. Automatic ray-traced shadows are enabled on supported Vulkan devices, with mapped-shadow fallbacks elsewhere. Packaging creates block-compressed runtime textures and compressed glTF copies, retaining original image fallbacks.
+Browser play uses the WebGPU-only StarHermit 1.50.0 web runtime. Automatic ray-traced shadows are enabled on supported Vulkan devices, with mapped-shadow fallbacks elsewhere. Packaging creates block-compressed runtime textures and compressed glTF copies, retaining original image fallbacks.
 
 Browser rendering uses the engine's asynchronous pipeline creation so newly encountered materials do not stall the page. Native play retains the engine's synchronous pipeline behavior.
 
