@@ -62,7 +62,7 @@
     "native/rules.ts": {"sha256": "07e6e4244e97dea90609a0862a5e87f3f9494d169d6885e4db261394a9e495d0", "size": 2304},
     "native/screens.ts": {"sha256": "bc17efae64b8457335e51c4709894c5f581c148ff5d2347e646c2f87fef76025", "size": 29585},
     "native/style.ts": {"sha256": "964fce19176227c60bc5817b11f92c72f851b8c52f58bf8bf379e5a2203cd284", "size": 2659},
-    "publication.json": {"sha256": "cd8af8dbb9f84e3e0b6d786bc0be5992704d5ac70a76ec4f4b2d7a9b578fc9f8", "size": 4313},
+    "publication.json": {"sha256": "61d54515c9f6f20a66e45066c17251a740f53267c8467f4945e84eca10f95742", "size": 4313},
     "score-script.js": {"sha256": "762eda4323fbe38bb29abf1117ec1d637253e288024f9aa8fcb5735b81ef2902", "size": 2488},
     "sfx/countdown-go.opus": {"sha256": "fc7507b812608ecf6291c78864a5383719c13de401321cb32ebbd20507342b5a", "size": 15105},
     "sfx/countdown-tick.opus": {"sha256": "3f4d6f7b2afce2969c145cdc86a8e4886102a0943356223f907f9bbebed9c858", "size": 12875},
