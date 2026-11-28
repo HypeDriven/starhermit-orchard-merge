@@ -29,7 +29,6 @@ export function loadSfx(): void {
   for (const name of SAMPLES) {
     loadClip(`sfx/${name}.opus`).then((c) => { clips.set(name, c); }, (e: unknown) => { console.warn(`sfx ${name}: ${String(e)}`); });
   }
-  renderAmbience().then((c) => { ambience = c; }, (e: unknown) => { console.warn(`audio: ${String(e)}`); });
 }
 /** A hidden window holds all sound. */
 export function setSuspended(on: boolean): void { suspended = on; }
@@ -72,7 +71,17 @@ let ambience: AudioClip | null = null;
 let ambSound: Sound | null = null;
 
 /** Each frame, once the mixer runs and the ambience is rendered: the loop by state. */
+let __bedsStarted = false;
+function startBeds(): void {
+  if (__bedsStarted) return;
+  __bedsStarted = true;
+  void (async () => {
+    renderAmbience().then((c) => { ambience = c; }, (e: unknown) => { console.warn(`audio: ${String(e)}`); });
+  })();
+}
+
 export function update(): void {
+  startBeds();
   if (context.state !== "running") return;
   if (!ambience) return;
   try {
